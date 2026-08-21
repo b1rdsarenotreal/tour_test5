@@ -1054,6 +1054,11 @@ form textarea{
 }
 .cal-tourney-cell{min-width: 220px;}
 .cal-tourney-name{font-weight: 700; margin-bottom: 4px;}
+.tourney-name-link{
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; font-weight: 700; color: var(--ink); text-align: left;
+}
+.tourney-name-link:hover{text-decoration: underline; color: var(--ball);}
 .cal-tourney-location{
   font-family:'JetBrains Mono', monospace;
   font-size: 11px;

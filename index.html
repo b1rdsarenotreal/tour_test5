@@ -141,6 +141,10 @@
           <h3>Longest Win Streak</h3>
           <div class="record-list"></div>
         </div>
+        <div class="record-panel" id="record-top10-wins">
+          <h3>Most Top 10 Wins</h3>
+          <div class="record-list"></div>
+        </div>
       </div>
 
       <div class="bracket-section-title"><h3>Most Titles by Level</h3></div>
@@ -187,6 +191,13 @@
       <p>Pick two players to see their head-to-head record.</p>
     </div>
     <div id="h2h-body" class="hidden"></div>
+  </section>
+
+  <!-- TOURNAMENT HISTORY (drill-down from Tournaments, not a top-level tab) -->
+  <section class="view hidden" id="view-tourney-history">
+    <button class="btn btn-ghost back-btn" id="tourney-history-back">&larr; Back to Tournaments</button>
+    <div class="view-head" id="tourney-history-head"></div>
+    <div id="tourney-history-body"></div>
   </section>
 
   <!-- BRACKET (drill-down from Tournaments, not a top-level tab) -->
