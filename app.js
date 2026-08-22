@@ -3323,6 +3323,14 @@ function renderEntryListBody(t){
   const container = $("#entry-list-body");
   container.innerHTML = "";
 
+  // Same dates already used by Process Entry List / Auto-Fill — showing
+  // each player's rank as of right now previews exactly what those actions
+  // will use, before you actually run them.
+  const entryDate = rankingDateFromSelectValue($("#bracket-entry-date").value);
+  const seedDate = rankingDateFromSelectValue($("#bracket-seed-date").value);
+  const entryRanks = ranksFromTotals(computeRankingsAsOf(entryDate));
+  const seedRanks = ranksFromTotals(computeRankingsAsOf(seedDate));
+
   const pickerWrap = el("div", {class:"picker-wrap"});
   pickerWrap.appendChild(el("input", {type:"text", class:"picker-input", "data-entrylist-search":"1", autocomplete:"off", placeholder:"Search player to add to entry list…"}));
   pickerWrap.appendChild(el("div", {class:"picker-suggestions hidden", "data-entrylist-suggestions":"1"}));
@@ -3338,7 +3346,11 @@ function renderEntryListBody(t){
       .sort((a,b) => a.p.name.localeCompare(b.p.name))
       .forEach(({entry, p}) => {
         const row = el("div", {class:"entry-list-row"});
-        row.appendChild(el("span", {class:"entry-list-name", html: playerNameHTML(p)}));
+        const erRank = entryRanks[p.id];
+        const srRank = seedRanks[p.id];
+        const rankBadges = (erRank ? '<span class="er-badge">ER: ' + erRank + '</span>' : '') +
+          (srRank ? '<span class="sr-badge">SR: ' + srRank + '</span>' : '');
+        row.appendChild(el("span", {class:"entry-list-name", html: rankBadges + playerNameHTML(p)}));
         const wcGroup = el("div", {class:"entry-list-wc-group"});
         [["none","Entry"], ["main","Main WC"], ["qual","Q WC"], ["pr","Main PR"], ["qpr","Q PR"]].forEach(([val, label]) => {
           const btn = el("button", {
@@ -4037,6 +4049,8 @@ function populateSlamFilterToggle(){
   $all("[data-slam-filter]").forEach(btn => btn.classList.toggle("active", btn.dataset.slamFilter === slamFilter));
 }
 
+let slamHistorySortCol = "W";
+
 function renderGrandSlamHistory(){
   populateSlamFilterToggle();
   const isTotal = slamFilter === "TOTAL";
@@ -4052,9 +4066,19 @@ function renderGrandSlamHistory(){
         hasHistorical: !!(h.QF || h.SF || h.F || h.W)
       };
     })
-    .filter(r => r.s.QF > 0)
-    .sort((a,b) =>
-      b.s.W - a.s.W || b.s.F - a.s.F || b.s.SF - a.s.SF || b.s.QF - a.s.QF || a.p.name.localeCompare(b.p.name));
+    .filter(r => r.s.QF > 0);
+
+  // Sorting is always primarily by whichever column you clicked — the
+  // other three still break ties in the usual Titles>F>SF>QF order, so
+  // sorting by "QF" surfaces the deepest overall careers among players
+  // tied on quarterfinal count, not an arbitrary order.
+  const metricOrder = ["W", "F", "SF", "QF"].filter(m => m !== slamHistorySortCol);
+  rows.sort((a,b) =>
+    b.s[slamHistorySortCol] - a.s[slamHistorySortCol] ||
+    b.s[metricOrder[0]] - a.s[metricOrder[0]] ||
+    b.s[metricOrder[1]] - a.s[metricOrder[1]] ||
+    b.s[metricOrder[2]] - a.s[metricOrder[2]] ||
+    a.p.name.localeCompare(b.p.name));
 
   const table = $("#slams-table");
   const empty = $("#slams-empty");
@@ -4065,6 +4089,10 @@ function renderGrandSlamHistory(){
   }
   table.classList.remove("hidden");
   empty.classList.add("hidden");
+
+  $all("#slams-thead-row [data-slam-sort-col]").forEach(th => {
+    th.classList.toggle("sort-active", th.dataset.slamSortCol === slamHistorySortCol);
+  });
 
   const mark = (r) => r.hasHistorical ? '<span class="hist-marker">*</span>' : "";
 
@@ -4744,6 +4772,14 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#finals-entry-container").addEventListener("input", handleFinalsGroupSearchInput);
   $("#finals-entry-container").addEventListener("click", handleFinalsEntryClick);
   $("#entry-list-generate").addEventListener("click", handleGenerateField);
+  $("#bracket-entry-date").addEventListener("change", () => {
+    const t = tournamentById(currentBracketTournamentId);
+    if(t) renderEntryListBody(t);
+  });
+  $("#bracket-seed-date").addEventListener("change", () => {
+    const t = tournamentById(currentBracketTournamentId);
+    if(t) renderEntryListBody(t);
+  });
   $("#entry-list-process").addEventListener("click", handleProcessEntryList);
 
   document.addEventListener("click", (e) => {
@@ -4806,6 +4842,12 @@ document.addEventListener("DOMContentLoaded", () => {
         finalsHistorySort = {col, dir: "desc"};
       }
       if(profileYearFilterPlayerId) renderPlayerProfile(profileYearFilterPlayerId);
+      return;
+    }
+    const slamSortTh = e.target.closest("[data-slam-sort-col]");
+    if(slamSortTh){
+      slamHistorySortCol = slamSortTh.dataset.slamSortCol;
+      renderGrandSlamHistory();
       return;
     }
     const bracketBtn = e.target.closest("[data-open-bracket]");
