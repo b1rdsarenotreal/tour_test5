@@ -985,14 +985,10 @@ function renderRankings(){
 
 /* ---------------- Players view ---------------- */
 function refreshAfterRetireChange(playerId){
-  // If the quick-view popup for this player is open, refresh it in place so
-  // the Retire/Unretire button immediately reflects the new state — same
-  // for the full page, if that's what's currently open instead.
+  // If the profile popup for this player is open, refresh it in place so
+  // the Retire/Unretire button immediately reflects the new state.
   if(!$("#player-modal-backdrop").classList.contains("hidden")){
     renderPlayerProfile(playerId);
-  }
-  if(currentPlayerPageId === playerId){
-    renderPlayerPage(playerId);
   }
   renderPlayers();
   renderRankings();
@@ -1369,7 +1365,7 @@ function computePlayerPeakRank(playerId){
 
 let profileYearFilterPlayerId = null;
 let profileYearFilter = "recent";
-function renderPlayerPage(playerId){
+function renderPlayerProfile(playerId){
   const p = playerById(playerId);
   if(!p) return;
   // Opening a *different* player's page resets the year filter back to the
@@ -1436,7 +1432,7 @@ function renderPlayerPage(playerId){
       return {t, res};
     });
 
-  const modal = $("#player-page-body");
+  const modal = $("#player-modal");
   modal.innerHTML = "";
   modal.appendChild(el("div", {class:"profile-head"}, [
     el("div", {}, [
@@ -1493,7 +1489,7 @@ function renderPlayerPage(playerId){
     yearSelect.value = profileYearFilter;
     yearSelect.addEventListener("change", (e) => {
       profileYearFilter = e.target.value;
-      renderPlayerPage(playerId);
+      renderPlayerProfile(playerId);
     });
     tourneyHeader.appendChild(yearSelect);
   }
@@ -1592,151 +1588,13 @@ function renderPlayerPage(playerId){
 
   modal.appendChild(el("div", {class:"modal-close-row"}, [
     el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
-    el("span", {})
-  ]));
-}
-
-// Figures out which page is actually on screen right now, in enough detail
-// to reopen it later — a top-level tab, a specific tournament's bracket, a
-// specific tournament's history page, or (if you clicked a name inside
-// someone else's full page) that other player's page. This is what lets
-// "Back" genuinely return to wherever you came from, chaining naturally
-// even through nested player-to-player navigation.
-function getCurrentViewState(){
-  const visible = $all(".view").find(v => !v.classList.contains("hidden"));
-  if(!visible) return {type:"tab", view:"rankings"};
-  if(visible.id === "view-bracket" && currentBracketTournamentId) return {type:"bracket", tournamentId: currentBracketTournamentId};
-  if(visible.id === "view-tourney-history" && currentTourneyHistoryName) return {type:"tourney-history", name: currentTourneyHistoryName};
-  if(visible.id === "view-player-page" && currentPlayerPageId) return {type:"player-page", playerId: currentPlayerPageId, returnTo: playerPageReturnTo};
-  return {type:"tab", view: visible.id.replace("view-", "")};
-}
-function restoreViewState(state){
-  if(!state){ switchView("players"); return; }
-  if(state.type === "bracket" && tournamentById(state.tournamentId)){ openBracket(state.tournamentId); return; }
-  if(state.type === "tourney-history"){ openTournamentHistory(state.name); return; }
-  if(state.type === "player-page" && playerById(state.playerId)){ openPlayerPage(state.playerId, state.returnTo); return; }
-  if(state.type === "tab"){ switchView(state.view); return; }
-  switchView("players");
-}
-
-let playerPageReturnTo = null;
-function openPlayerPage(playerId, returnTo){
-  // Capture where we're navigating FROM before anything changes, unless a
-  // specific return destination was already passed in (used when replaying
-  // a saved state from restoreViewState above).
-  playerPageReturnTo = returnTo !== undefined ? returnTo : getCurrentViewState();
-  closePlayerModal();
-  currentPlayerPageId = playerId;
-  $all(".tab").forEach(tab => tab.classList.remove("active"));
-  $all(".view").forEach(v => v.classList.add("hidden"));
-  $("#view-player-page").classList.remove("hidden");
-  renderPlayerPage(playerId);
-}
-function closePlayerPage(){
-  currentPlayerPageId = null;
-  restoreViewState(playerPageReturnTo);
-}
-
-let currentPlayerPageId = null;
-
-function renderPlayerProfile(playerId){
-  const p = playerById(playerId);
-  if(!p) return;
-
-  const latest = getLatestActiveDate();
-  const currentYear = new Date(latest).getFullYear();
-  const totals = computeRankingsAsOf(latest);
-  const seasonStats = computeRankings(currentYear).get(playerId) || {points:0, titles:0};
-  const currentRank = ranksFromTotals(totals)[playerId] || null;
-  const peakRank = computePlayerPeakRank(playerId);
-
-  const tourMatches = matchesForPlayer(playerId).filter(m => (m.bracket || "main") !== "qual");
-  const yearMatches = tourMatches.filter(m => {
-    const t = tournamentById(m.tournamentId);
-    return t && t.year === currentYear;
-  });
-  const yearWins = yearMatches.filter(m => m.winnerId === playerId).length;
-  const yearLosses = yearMatches.length - yearWins;
-
-  // Current-season surface record, matching the season stats box above it.
-  const surfaceStats = {hard:{w:0,l:0}, clay:{w:0,l:0}, grass:{w:0,l:0}};
-  yearMatches.forEach(m => {
-    const t = tournamentById(m.tournamentId);
-    if(!t || !surfaceStats[t.surface]) return;
-    if(m.winnerId === playerId) surfaceStats[t.surface].w++; else surfaceStats[t.surface].l++;
-  });
-
-  const last5 = state.tournaments
-    .filter(t => matchesForTournament(t.id).some(m => m.playerAId === playerId || m.playerBId === playerId))
-    .sort((a,b) => tournamentDateMs(b) - tournamentDateMs(a))
-    .slice(0, 5)
-    .map(t => ({t, res: computeTournamentResults(t.id).get(playerId)}));
-
-  const modal = $("#player-modal");
-  modal.innerHTML = "";
-  modal.appendChild(el("div", {class:"profile-head"}, [
-    el("div", {}, [
-      el("div", {class:"profile-name", html: playerNameHTML(p)}),
-      el("div", {class:"profile-meta"}, [
-        (p.country ? p.country.toUpperCase() : "—") + " · " + (p.hand === "L" ? "Left-handed" : "Right-handed")
-      ])
-    ]),
-    el("button", {class:"btn btn-small btn-ghost", "data-edit-player": p.id}, ["Edit"])
-  ]));
-
-  const bioItems = [];
-  if(currentRank) bioItems.push(["Current Rank", "No. " + currentRank]);
-  if(peakRank) bioItems.push(["Peak Rank", "No. " + peakRank]);
-  if(bioItems.length){
-    modal.appendChild(el("div", {class:"bio-grid"}, bioItems.map(([label, value]) =>
-      el("div", {class:"bio-item"}, [
-        el("div", {class:"bio-label"}, [label]),
-        el("div", {class:"bio-value"}, [value])
-      ])
-    )));
-  }
-
-  const statsBox = el("div", {class:"profile-stats"}, [
-    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [String(seasonStats.points.toLocaleString())]), el("div", {class:"stat-label"}, [String(currentYear) + " Points"])]),
-    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [String(seasonStats.titles)]), el("div", {class:"stat-label"}, [String(currentYear) + " Titles"])]),
-    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [yearWins + "-" + yearLosses]), el("div", {class:"stat-label"}, [String(currentYear) + " Win-Loss"])])
-  ]);
-  modal.appendChild(statsBox);
-
-  const surfaceRow = el("div", {class:"profile-stats"}, ["hard","clay","grass"].map(s =>
-    el("div", {class:"stat-box"}, [
-      el("div", {class:"stat-num"}, [surfaceStats[s].w + "-" + surfaceStats[s].l]),
-      el("div", {class:"stat-label"}, [s])
-    ])
-  ));
-  modal.appendChild(surfaceRow);
-
-  modal.appendChild(el("div", {class:"profile-section-title"}, ["Last 5 Tournaments"]));
-  if(last5.length === 0){
-    modal.appendChild(el("p", {}, ["No tournaments played yet."]));
-  } else {
-    last5.forEach(({t, res}) => {
-      const row = el("div", {class:"tourney-row"}, [
-        el("span", {class:"level-tag " + (LEVEL_TAG_CLASSES[t.level] || "")}, [LEVEL_LABELS[t.level] || t.level]),
-        el("span", {class:"surface-tag surface-" + t.surface}, [t.surface]),
-        el("span", {class:"tourney-name"}, [t.name + " '" + String(t.year).slice(-2)]),
-        el("span", {class:"tourney-champ"}, [res ? res.label : "In progress"])
-      ]);
-      modal.appendChild(row);
-    });
-  }
-
-  modal.appendChild(el("div", {class:"modal-close-row"}, [
-    el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
-    el("div", {style:"display:flex; gap:8px;"}, [
-      el("button", {class:"btn btn-primary", "data-open-player-page": p.id}, ["View Full Profile \u2192"]),
-      el("button", {class:"btn btn-ghost", id:"profile-close"}, ["Close"])
-    ])
+    el("button", {class:"btn btn-ghost", id:"profile-close"}, ["Close"])
   ]));
 
   $("#player-modal-backdrop").classList.remove("hidden");
   $("#profile-close").addEventListener("click", closePlayerModal);
 }
+
 
 
 // Small inline SVG line chart: rank on the y-axis (inverted — No.1 at top), chronological on x.
@@ -4737,7 +4595,6 @@ function handleDeleteTournament(id){
 function switchView(view){
   $all(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === view));
   $all(".view").forEach(v => v.classList.toggle("hidden", v.id !== "view-" + view));
-  if(view !== "player-page") currentPlayerPageId = null;
   if(view !== "tourney-history") currentTourneyHistoryName = null;
   if(view === "rankings") renderRankings();
   if(view === "players") renderPlayers();
@@ -4859,7 +4716,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#bracket-back").addEventListener("click", closeBracket);
   $("#tourney-history-back").addEventListener("click", closeTournamentHistory);
-  $("#player-page-back").addEventListener("click", closePlayerPage);
   $("#bracket-subnav").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-bracket-tab]");
     if(!btn || btn.classList.contains("hidden")) return;
@@ -4941,8 +4797,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if(editBtn){ openEditPlayer(editBtn.dataset.editPlayer); return; }
     const openBtn = e.target.closest("[data-open-player]");
     if(openBtn){ renderPlayerProfile(openBtn.dataset.openPlayer); return; }
-    const openPageBtn = e.target.closest("[data-open-player-page]");
-    if(openPageBtn){ openPlayerPage(openPageBtn.dataset.openPlayerPage); return; }
     const sortTh = e.target.closest("[data-sort-col]");
     if(sortTh){
       const col = sortTh.dataset.sortCol;
@@ -4951,7 +4805,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         finalsHistorySort = {col, dir: "desc"};
       }
-      if(currentPlayerPageId) renderPlayerPage(currentPlayerPageId);
+      if(profileYearFilterPlayerId) renderPlayerProfile(profileYearFilterPlayerId);
       return;
     }
     const bracketBtn = e.target.closest("[data-open-bracket]");
