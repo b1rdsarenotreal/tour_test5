@@ -1407,13 +1407,6 @@ function renderPlayerPage(playerId){
   ));
   modal.appendChild(surfaceRow);
 
-  modal.appendChild(el("div", {class:"profile-section-title"}, ["Ranking History"]));
-  if(history.length < 2){
-    modal.appendChild(el("p", {}, ["Not enough tournaments played yet to chart a trend."]));
-  } else {
-    modal.appendChild(el("div", {class:"rank-chart", html: renderRankHistorySVG(history)}));
-  }
-
   const gsGrid = grandSlamGridHTML(playerId);
   if(gsGrid){
     modal.appendChild(el("div", {class:"profile-section-title"}, ["Grand Slam History"]));
@@ -1533,6 +1526,13 @@ function renderPlayerPage(playerId){
     });
   }
 
+  modal.appendChild(el("div", {class:"profile-section-title"}, ["Ranking History"]));
+  if(history.length < 2){
+    modal.appendChild(el("p", {}, ["Not enough tournaments played yet to chart a trend."]));
+  } else {
+    modal.appendChild(el("div", {class:"rank-chart", html: renderRankHistorySVG(history)}));
+  }
+
   modal.appendChild(el("div", {class:"modal-close-row"}, [
     el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
     el("span", {})
@@ -1601,10 +1601,9 @@ function renderPlayerProfile(playerId){
   const yearWins = yearMatches.filter(m => m.winnerId === playerId).length;
   const yearLosses = yearMatches.length - yearWins;
 
-  // Career surface record — a stable, general fact about the player, not
-  // scoped to just this season (which would often be a very small sample).
+  // Current-season surface record, matching the season stats box above it.
   const surfaceStats = {hard:{w:0,l:0}, clay:{w:0,l:0}, grass:{w:0,l:0}};
-  tourMatches.forEach(m => {
+  yearMatches.forEach(m => {
     const t = tournamentById(m.tournamentId);
     if(!t || !surfaceStats[t.surface]) return;
     if(m.winnerId === playerId) surfaceStats[t.surface].w++; else surfaceStats[t.surface].l++;
@@ -1693,8 +1692,13 @@ function renderRankHistorySVG(history){
   const yFor = (rank) => padT + ((rank - minRank) / Math.max(1, (maxRank - minRank))) * innerH;
 
   const points = history.map((pt, i) => xFor(i) + "," + yFor(pt.rank)).join(" ");
+  // A slightly larger invisible hit-area sits behind each visible dot so the
+  // tooltip is easy to trigger on hover, not just on the tiny 3px point.
   const dots = history.map((pt, i) =>
-    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="3" fill="var(--ink)"></circle>'
+    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="8" fill="transparent">' +
+      '<title>Week of ' + formatWeekDate(pt.date) + ': No. ' + pt.rank + '</title>' +
+    '</circle>' +
+    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="3" fill="var(--ink)" style="pointer-events:none;"></circle>'
   ).join("");
 
   const gridLines = [minRank, Math.round((minRank+maxRank)/2), maxRank].map(r =>

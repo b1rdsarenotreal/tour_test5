@@ -565,7 +565,7 @@ form textarea{
 .rank-move.down{color: var(--clay);}
 .rank-move.new{color: var(--hard); font-weight:700;}
 .rank-move.flat{color: var(--ink-soft);}
-.rank-chart{margin: 12px 0 4px;}
+.rank-chart{margin: 12px 0 4px; max-width: 560px;}
 .rank-chart svg{width:100%; height:auto; display:block;}
 .bio-grid{
   display:grid; grid-template-columns: repeat(auto-fit, minmax(110px,1fr));
