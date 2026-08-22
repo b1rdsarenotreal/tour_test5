@@ -1183,8 +1183,23 @@ function gsCellClass(code){
 function computePlayerGrandSlamGrid(playerId){
   const slamTournaments = state.tournaments.filter(t => t.level === "GRAND_SLAM");
   if(slamTournaments.length === 0) return null;
+
+  // Only show years within this player's own active career span — not
+  // every year any Grand Slam has ever existed in the system, which could
+  // stretch back well before this player even joined the tour.
+  const playerActiveYears = matchesForPlayer(playerId)
+    .map(m => tournamentById(m.tournamentId))
+    .filter(Boolean)
+    .map(t => t.year);
+  if(playerActiveYears.length === 0) return null;
+  const careerStart = Math.min(...playerActiveYears);
+  const careerEnd = Math.max(...playerActiveYears);
+
   const majorNames = sortMajorNamesByCalendarOrder(Array.from(new Set(slamTournaments.map(t => t.name))));
-  const years = Array.from(new Set(slamTournaments.map(t => t.year))).sort((a,b) => a - b);
+  const years = Array.from(new Set(slamTournaments.map(t => t.year)))
+    .filter(y => y >= careerStart && y <= careerEnd)
+    .sort((a,b) => a - b);
+  if(years.length === 0) return null;
 
   function tourRecordAt(t){
     let w = 0, l = 0;
@@ -1556,16 +1571,22 @@ function handleGlobalSearchInput(e){
   if(!query.trim()){ suggestionsEl.classList.add("hidden"); suggestionsEl.innerHTML = ""; return; }
 
   const playerResults = state.players.filter(p => matchesSearch(p.name, query)).slice(0, 6);
-  const tourneyResults = state.tournaments.filter(t => matchesSearch(t.name, query)).slice(0, 6);
+  const tourneyNames = Array.from(new Set(state.tournaments.map(t => t.name)))
+    .filter(name => matchesSearch(name, query))
+    .slice(0, 6);
 
   let html = "";
   if(playerResults.length){
     html += '<div class="search-group-label">Players</div>';
     html += playerResults.map(p => '<button type="button" class="picker-option" data-search-open-player="' + p.id + '">' + playerNameHTML(p) + (p.retired ? ' <span class="hist-marker">(retired)</span>' : "") + '</button>').join("");
   }
-  if(tourneyResults.length){
+  if(tourneyNames.length){
     html += '<div class="search-group-label">Tournaments</div>';
-    html += tourneyResults.map(t => '<button type="button" class="picker-option" data-search-open-tournament="' + t.id + '">' + escapeHtml(t.name) + " '" + String(t.year).slice(-2) + '</button>').join("");
+    html += tourneyNames.map(name => {
+      const editionCount = state.tournaments.filter(t => t.name === name).length;
+      return '<button type="button" class="picker-option" data-search-open-tourney-history="' + escapeHtml(name) + '">' + escapeHtml(name) +
+        ' <span class="hist-marker">(' + editionCount + ' edition' + (editionCount === 1 ? "" : "s") + ')</span></button>';
+    }).join("");
   }
   suggestionsEl.innerHTML = html || '<div class="picker-empty">No match</div>';
   suggestionsEl.classList.remove("hidden");
@@ -1579,9 +1600,9 @@ function handleGlobalSearchClick(e){
     $("#global-search-suggestions").classList.add("hidden");
     return;
   }
-  const tourneyBtn = e.target.closest("[data-search-open-tournament]");
+  const tourneyBtn = e.target.closest("[data-search-open-tourney-history]");
   if(tourneyBtn){
-    openBracket(tourneyBtn.dataset.searchOpenTournament);
+    openTournamentHistory(tourneyBtn.dataset.searchOpenTourneyHistory);
     $("#global-search-input").value = "";
     $("#global-search-suggestions").classList.add("hidden");
   }
