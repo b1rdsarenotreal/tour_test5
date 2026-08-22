@@ -1692,13 +1692,16 @@ function renderRankHistorySVG(history){
   const yFor = (rank) => padT + ((rank - minRank) / Math.max(1, (maxRank - minRank))) * innerH;
 
   const points = history.map((pt, i) => xFor(i) + "," + yFor(pt.rank)).join(" ");
-  // A slightly larger invisible hit-area sits behind each visible dot so the
-  // tooltip is easy to trigger on hover, not just on the tiny 3px point.
+  // A slightly larger hit-area sits behind each visible dot so the tooltip
+  // is easy to trigger on hover, not just on the tiny 3px point. It needs
+  // pointer-events="all" explicitly — an SVG shape with a transparent fill
+  // doesn't register hover/pointer events by default, only a painted one
+  // would, so without this the tooltip would never actually fire.
   const dots = history.map((pt, i) =>
-    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="8" fill="transparent">' +
+    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="8" fill="transparent" pointer-events="all">' +
       '<title>Week of ' + formatWeekDate(pt.date) + ': No. ' + pt.rank + '</title>' +
     '</circle>' +
-    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="3" fill="var(--ink)" style="pointer-events:none;"></circle>'
+    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="3" fill="var(--ink)" pointer-events="none"></circle>'
   ).join("");
 
   const gridLines = [minRank, Math.round((minRank+maxRank)/2), maxRank].map(r =>
@@ -1706,8 +1709,24 @@ function renderRankHistorySVG(history){
     '<text x="2" y="' + (yFor(r)+4) + '" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--ink-soft)">' + r + '</text>'
   ).join("");
 
+  // A subtle vertical marker (and year label) wherever the calendar year
+  // actually changes — not every date, just the boundaries, so it stays
+  // readable no matter how many weeks of history there are.
+  const yearMarkers = [];
+  history.forEach((pt, i) => {
+    const year = new Date(pt.date).getFullYear();
+    if(i === 0 || new Date(history[i-1].date).getFullYear() !== year){
+      yearMarkers.push({x: xFor(i), year});
+    }
+  });
+  const yearMarkersHTML = yearMarkers.map(({x, year}) =>
+    '<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (h - padB) + '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2,2"></line>' +
+    '<text x="' + x + '" y="' + (h - 6) + '" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--ink-soft)">' + year + '</text>'
+  ).join("");
+
   return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
     gridLines +
+    yearMarkersHTML +
     '<polyline points="' + points + '" fill="none" stroke="var(--ink)" stroke-width="2"></polyline>' +
     dots +
     '</svg>';
