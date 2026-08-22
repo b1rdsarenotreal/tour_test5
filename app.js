@@ -985,10 +985,14 @@ function renderRankings(){
 
 /* ---------------- Players view ---------------- */
 function refreshAfterRetireChange(playerId){
-  // If the profile modal for this player is open, refresh it in place so the
-  // Retire/Unretire button immediately reflects the new state.
+  // If the quick-view popup for this player is open, refresh it in place so
+  // the Retire/Unretire button immediately reflects the new state — same
+  // for the full page, if that's what's currently open instead.
   if(!$("#player-modal-backdrop").classList.contains("hidden")){
     renderPlayerProfile(playerId);
+  }
+  if(currentPlayerPageId === playerId){
+    renderPlayerPage(playerId);
   }
   renderPlayers();
   renderRankings();
@@ -1299,11 +1303,11 @@ function computePlayerPeakRank(playerId){
 
 let profileYearFilterPlayerId = null;
 let profileYearFilter = "recent";
-function renderPlayerProfile(playerId){
+function renderPlayerPage(playerId){
   const p = playerById(playerId);
   if(!p) return;
-  // Opening a *different* player's profile resets the year filter back to
-  // the default — re-rendering the SAME player (retire toggle, changing the
+  // Opening a *different* player's page resets the year filter back to the
+  // default — re-rendering the SAME player (retire toggle, changing the
   // year dropdown itself) keeps whatever's currently selected.
   if(profileYearFilterPlayerId !== playerId){
     profileYearFilter = "recent";
@@ -1362,7 +1366,7 @@ function renderPlayerProfile(playerId){
       return {t, res};
     });
 
-  const modal = $("#player-modal");
+  const modal = $("#player-page-body");
   modal.innerHTML = "";
   modal.appendChild(el("div", {class:"profile-head"}, [
     el("div", {}, [
@@ -1426,7 +1430,7 @@ function renderPlayerProfile(playerId){
     yearSelect.value = profileYearFilter;
     yearSelect.addEventListener("change", (e) => {
       profileYearFilter = e.target.value;
-      renderPlayerProfile(playerId);
+      renderPlayerPage(playerId);
     });
     tourneyHeader.appendChild(yearSelect);
   }
@@ -1530,13 +1534,88 @@ function renderPlayerProfile(playerId){
   }
 
   modal.appendChild(el("div", {class:"modal-close-row"}, [
-    el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), id:"profile-retire-toggle", "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
-    el("button", {class:"btn btn-ghost", id:"profile-close"}, ["Close"])
+    el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
+    el("span", {})
+  ]));
+}
+
+function openPlayerPage(playerId){
+  closePlayerModal();
+  currentPlayerPageId = playerId;
+  $all(".tab").forEach(tab => tab.classList.remove("active"));
+  $all(".view").forEach(v => v.classList.add("hidden"));
+  $("#view-player-page").classList.remove("hidden");
+  renderPlayerPage(playerId);
+}
+function closePlayerPage(){
+  currentPlayerPageId = null;
+  switchView("players");
+}
+
+let currentPlayerPageId = null;
+
+function renderPlayerProfile(playerId){
+  const p = playerById(playerId);
+  if(!p) return;
+
+  const latest = getLatestActiveDate();
+  const currentYear = new Date(latest).getFullYear();
+  const totals = computeRankingsAsOf(latest);
+  const seasonStats = computeRankings(currentYear).get(playerId) || {points:0, titles:0};
+  const currentRank = ranksFromTotals(totals)[playerId] || null;
+  const peakRank = computePlayerPeakRank(playerId);
+
+  const tourMatches = matchesForPlayer(playerId).filter(m => (m.bracket || "main") !== "qual");
+  const yearMatches = tourMatches.filter(m => {
+    const t = tournamentById(m.tournamentId);
+    return t && t.year === currentYear;
+  });
+  const yearWins = yearMatches.filter(m => m.winnerId === playerId).length;
+  const yearLosses = yearMatches.length - yearWins;
+
+  const modal = $("#player-modal");
+  modal.innerHTML = "";
+  modal.appendChild(el("div", {class:"profile-head"}, [
+    el("div", {}, [
+      el("div", {class:"profile-name", html: playerNameHTML(p)}),
+      el("div", {class:"profile-meta"}, [
+        (p.country ? p.country.toUpperCase() : "—") + " · " + (p.hand === "L" ? "Left-handed" : "Right-handed")
+      ])
+    ]),
+    el("button", {class:"btn btn-small btn-ghost", "data-edit-player": p.id}, ["Edit"])
+  ]));
+
+  const bioItems = [];
+  if(currentRank) bioItems.push(["Current Rank", "No. " + currentRank]);
+  if(peakRank) bioItems.push(["Peak Rank", "No. " + peakRank]);
+  if(bioItems.length){
+    modal.appendChild(el("div", {class:"bio-grid"}, bioItems.map(([label, value]) =>
+      el("div", {class:"bio-item"}, [
+        el("div", {class:"bio-label"}, [label]),
+        el("div", {class:"bio-value"}, [value])
+      ])
+    )));
+  }
+
+  const statsBox = el("div", {class:"profile-stats"}, [
+    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [String(seasonStats.points.toLocaleString())]), el("div", {class:"stat-label"}, [String(currentYear) + " Points"])]),
+    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [String(seasonStats.titles)]), el("div", {class:"stat-label"}, [String(currentYear) + " Titles"])]),
+    el("div", {class:"stat-box"}, [el("div", {class:"stat-num"}, [yearWins + "-" + yearLosses]), el("div", {class:"stat-label"}, [String(currentYear) + " Win-Loss"])])
+  ]);
+  modal.appendChild(statsBox);
+
+  modal.appendChild(el("div", {class:"modal-close-row"}, [
+    el("button", {class:"btn btn-small " + (p.retired ? "btn-primary" : "btn-danger"), "data-toggle-retire": p.id}, [p.retired ? "Unretire" : "Retire"]),
+    el("div", {style:"display:flex; gap:8px;"}, [
+      el("button", {class:"btn btn-primary", "data-open-player-page": p.id}, ["View Full Profile \u2192"]),
+      el("button", {class:"btn btn-ghost", id:"profile-close"}, ["Close"])
+    ])
   ]));
 
   $("#player-modal-backdrop").classList.remove("hidden");
   $("#profile-close").addEventListener("click", closePlayerModal);
 }
+
 
 // Small inline SVG line chart: rank on the y-axis (inverted — No.1 at top), chronological on x.
 function renderRankHistorySVG(history){
@@ -4509,6 +4588,7 @@ function handleDeleteTournament(id){
 function switchView(view){
   $all(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === view));
   $all(".view").forEach(v => v.classList.toggle("hidden", v.id !== "view-" + view));
+  if(view !== "player-page") currentPlayerPageId = null;
   if(view === "rankings") renderRankings();
   if(view === "players") renderPlayers();
   if(view === "tournaments") renderTournaments();
@@ -4629,6 +4709,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#bracket-back").addEventListener("click", closeBracket);
   $("#tourney-history-back").addEventListener("click", closeTournamentHistory);
+  $("#player-page-back").addEventListener("click", closePlayerPage);
   $("#bracket-subnav").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-bracket-tab]");
     if(!btn || btn.classList.contains("hidden")) return;
@@ -4710,6 +4791,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if(editBtn){ openEditPlayer(editBtn.dataset.editPlayer); return; }
     const openBtn = e.target.closest("[data-open-player]");
     if(openBtn){ renderPlayerProfile(openBtn.dataset.openPlayer); return; }
+    const openPageBtn = e.target.closest("[data-open-player-page]");
+    if(openPageBtn){ openPlayerPage(openPageBtn.dataset.openPlayerPage); return; }
     const bracketBtn = e.target.closest("[data-open-bracket]");
     if(bracketBtn){ openBracket(bracketBtn.dataset.openBracket); return; }
     const tourneyHistBtn = e.target.closest("[data-open-tourney-history]");
