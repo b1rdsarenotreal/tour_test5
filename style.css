@@ -355,6 +355,18 @@ main.wrap{padding-top: 32px; padding-bottom: 80px;}
 .final-champ{color: var(--grass) !important;}
 .final-runnerup{color: var(--ink-soft) !important;}
 
+.finals-history-table{white-space: nowrap;}
+.finals-history-table th.sortable-th{
+  cursor: pointer;
+  user-select: none;
+}
+.finals-history-table th.sortable-th:hover{background: var(--paper-2);}
+.finals-history-table .sort-hint{color: var(--ink-soft); font-weight: 400; font-size: 10px;}
+.finals-history-table tr.fh-row-win{background: #ddf5dd;}
+.finals-history-table tr.fh-row-loss{background: #fbdede;}
+.finals-history-table tr.fh-row-win td:first-child{color: var(--grass); font-weight: 700;}
+.finals-history-table tr.fh-row-loss td:first-child{color: #c0392b; font-weight: 700;}
+
 /* ---------- Forms ---------- */
 .card.form-card{
   background: white;

@@ -1124,6 +1124,71 @@ function getFinalResultsForPlayer(playerId){
   return results;
 }
 
+/* ---------------- Finals History sortable table ---------------- */
+const FINALS_HISTORY_COLUMNS = [
+  ["result", "Result"], ["wl", "W\u2013L"], ["date", "Date"], ["tournament", "Tournament"],
+  ["tier", "Tier"], ["surface", "Surface"], ["opponent", "Opponent"], ["score", "Score"]
+];
+let finalsHistorySort = {col:"date", dir:"desc"};
+let finalsHistorySortPlayerId = null;
+
+function finalsHistoryTableHTML(playerId){
+  // Tally is always computed chronologically (oldest first) regardless of
+  // how the table is currently sorted for display — it represents their
+  // finals record AT that point in their career, not a display artifact.
+  const chronological = getFinalResultsForPlayer(playerId).slice().sort((a,b) => tournamentDateMs(a.t) - tournamentDateMs(b.t));
+  let w = 0, l = 0;
+  const rows = chronological.map(r => {
+    if(r.isChamp) w++; else l++;
+    return {...r, wlLabel: w + "\u2013" + l, wlSortVal: w};
+  });
+  if(rows.length === 0) return null;
+
+  const sortValue = (row, col) => {
+    switch(col){
+      case "result": return row.isChamp ? 1 : 0;
+      case "wl": return row.wlSortVal;
+      case "date": return tournamentDateMs(row.t);
+      case "tournament": return row.t.name.toLowerCase();
+      case "tier": return row.t.level;
+      case "surface": return row.t.surface;
+      case "opponent": return row.opponent ? row.opponent.name.toLowerCase() : "";
+      default: return 0;
+    }
+  };
+
+  const sorted = rows.slice().sort((a,b) => {
+    const av = sortValue(a, finalsHistorySort.col), bv = sortValue(b, finalsHistorySort.col);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return finalsHistorySort.dir === "asc" ? cmp : -cmp;
+  });
+
+  let html = '<table class="data-table finals-history-table"><thead><tr>';
+  FINALS_HISTORY_COLUMNS.forEach(([key, label]) => {
+    const sortable = key !== "score";
+    const isActive = finalsHistorySort.col === key;
+    const arrow = isActive ? (finalsHistorySort.dir === "asc" ? " \u25b2" : " \u25bc") : (sortable ? ' <span class="sort-hint">\u21c5</span>' : "");
+    html += '<th' + (sortable ? ' class="sortable-th" data-sort-col="' + key + '"' : '') + '>' + label + arrow + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  sorted.forEach(row => {
+    const {t, isChamp, opponent, match, wlLabel} = row;
+    html += '<tr class="' + (isChamp ? "fh-row-win" : "fh-row-loss") + '">' +
+      '<td><b>' + (isChamp ? "Win" : "Loss") + '</b></td>' +
+      '<td>' + wlLabel + '</td>' +
+      '<td>' + formatWeekDate(tournamentDateMs(t)) + '</td>' +
+      '<td><button class="tourney-name-link" data-open-tourney-history="' + escapeHtml(t.name) + '">' + escapeHtml(t.name) + '</button>' + (t.location ? ", " + escapeHtml(t.location) : "") + '</td>' +
+      '<td><span class="level-tag ' + (LEVEL_TAG_CLASSES[t.level] || "") + '">' + escapeHtml(LEVEL_LABELS[t.level] || t.level) + '</span></td>' +
+      '<td><span class="surface-tag surface-' + t.surface + '">' + t.surface + '</span></td>' +
+      '<td>' + (opponent ? playerLinkHTML(opponent) : "(unknown)") + '</td>' +
+      '<td>' + renderScoreboardHTML(match) + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
 // Every win over a Top 10 opponent — using the opponent's OFFICIAL ranking
 // for the week that specific tournament was played, not their ranking
 // today. Beating a since-retired former No. 3 still counts; beating
@@ -1142,7 +1207,8 @@ function getTop10WinsForPlayer(playerId){
     const rankMap = ranksFromTotals(officialRankingsAsOf(weekMonday));
     const opponentRank = rankMap[opponentId];
     if(!opponentRank || opponentRank > 10) return;
-    wins.push({t, match: m, opponent: playerById(opponentId), opponentRank});
+    const ownRankAtTime = rankMap[playerId] || null;
+    wins.push({t, match: m, opponent: playerById(opponentId), opponentRank, ownRankAtTime});
   });
   wins.sort((a,b) => tournamentDateMs(b.t) - tournamentDateMs(a.t));
   return wins;
@@ -1312,6 +1378,10 @@ function renderPlayerPage(playerId){
   if(profileYearFilterPlayerId !== playerId){
     profileYearFilter = "recent";
     profileYearFilterPlayerId = playerId;
+  }
+  if(finalsHistorySortPlayerId !== playerId){
+    finalsHistorySort = {col:"date", dir:"desc"};
+    finalsHistorySortPlayerId = playerId;
   }
   const matches = matchesForPlayer(playerId).sort((a,b) => {
     const ta = tournamentById(a.tournamentId), tb = tournamentById(b.tournamentId);
@@ -1484,25 +1554,11 @@ function renderPlayerPage(playerId){
   modal.appendChild(careerSurfaceRow);
 
   modal.appendChild(el("div", {class:"profile-section-title"}, ["Final Results"]));
-  const finalResults = getFinalResultsForPlayer(playerId);
-  if(finalResults.length === 0){
+  const finalsTableHTML = finalsHistoryTableHTML(playerId);
+  if(!finalsTableHTML){
     modal.appendChild(el("p", {}, ["No finals reached yet."]));
   } else {
-    finalResults.forEach(({t, isChamp, opponent, match}) => {
-      const bracketBtn = el("button", {class:"btn btn-small btn-ghost", "data-open-bracket": t.id}, ["Bracket"]);
-      const row = el("div", {class:"tourney-row"}, [
-        el("span", {class:"level-tag " + (LEVEL_TAG_CLASSES[t.level] || "")}, [LEVEL_LABELS[t.level] || t.level]),
-        el("span", {class:"surface-tag surface-" + t.surface}, [t.surface]),
-        el("span", {class:"tourney-name"}, [t.name + " '" + String(t.year).slice(-2)]),
-        el("span", {class:"tourney-champ", html:
-          '<b class="' + (isChamp ? "final-champ" : "final-runnerup") + '">' + (isChamp ? "Champion" : "Runner-up") + '</b>' +
-          ' — ' + (isChamp ? "def. " : "lost to ") + (opponent ? playerLinkHTML(opponent) : "(unknown)")
-        }),
-        el("span", {html: renderScoreboardHTML(match)}),
-        bracketBtn
-      ]);
-      modal.appendChild(row);
-    });
+    modal.appendChild(el("div", {class:"calendar-scroll", html: finalsTableHTML}));
   }
 
   modal.appendChild(el("div", {class:"profile-section-title"}, ["Top 10 Wins"]));
@@ -1510,13 +1566,14 @@ function renderPlayerPage(playerId){
   if(top10Wins.length === 0){
     modal.appendChild(el("p", {}, ["No wins over a Top 10 opponent yet."]));
   } else {
-    top10Wins.forEach(({t, match, opponent, opponentRank}) => {
+    top10Wins.forEach(({t, match, opponent, opponentRank, ownRankAtTime}) => {
       const bracketBtn = el("button", {class:"btn btn-small btn-ghost", "data-open-bracket": t.id}, ["Bracket"]);
       const row = el("div", {class:"tourney-row"}, [
         el("span", {class:"level-tag " + (LEVEL_TAG_CLASSES[t.level] || "")}, [LEVEL_LABELS[t.level] || t.level]),
         el("span", {class:"tourney-name"}, [t.name + " '" + String(t.year).slice(-2)]),
         el("span", {class:"tourney-champ", html:
-          '<b class="final-champ">No. ' + opponentRank + '</b> — def. ' + (opponent ? playerLinkHTML(opponent) : "(unknown)") +
+          (ownRankAtTime ? '(No. ' + ownRankAtTime + ') ' : '') + 'def. ' +
+          '<b class="final-champ">No. ' + opponentRank + '</b> ' + (opponent ? playerLinkHTML(opponent) : "(unknown)") +
           ' (' + (ROUND_LABELS[match.round] || match.round) + ')'
         }),
         el("span", {html: renderScoreboardHTML(match)}),
@@ -4886,6 +4943,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if(openBtn){ renderPlayerProfile(openBtn.dataset.openPlayer); return; }
     const openPageBtn = e.target.closest("[data-open-player-page]");
     if(openPageBtn){ openPlayerPage(openPageBtn.dataset.openPlayerPage); return; }
+    const sortTh = e.target.closest("[data-sort-col]");
+    if(sortTh){
+      const col = sortTh.dataset.sortCol;
+      if(finalsHistorySort.col === col){
+        finalsHistorySort.dir = finalsHistorySort.dir === "asc" ? "desc" : "asc";
+      } else {
+        finalsHistorySort = {col, dir: "desc"};
+      }
+      if(currentPlayerPageId) renderPlayerPage(currentPlayerPageId);
+      return;
+    }
     const bracketBtn = e.target.closest("[data-open-bracket]");
     if(bracketBtn){ openBracket(bracketBtn.dataset.openBracket); return; }
     const tourneyHistBtn = e.target.closest("[data-open-tourney-history]");
