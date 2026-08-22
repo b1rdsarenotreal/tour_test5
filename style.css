@@ -679,7 +679,7 @@ form textarea{
   padding: 26px;
 }
 .modal h3{font-size: 20px; margin-bottom: 18px;}
-#player-modal{max-width: 1400px;}
+#player-modal{max-width: 1800px;}
 
 /* Player profile modal contents */
 .profile-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 18px;}
