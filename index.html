@@ -24,8 +24,14 @@
       <button class="tab active" data-view="rankings">Rankings</button>
       <button class="tab" data-view="players">Players</button>
       <button class="tab" data-view="tournaments">Tournaments</button>
-      <button class="tab" data-view="records">Records</button>
-      <button class="tab" data-view="slams">Slam History</button>
+      <div class="tab-dropdown" id="records-dropdown">
+        <button class="tab dropdown-toggle" id="records-dropdown-toggle" type="button">Records &#9662;</button>
+        <div class="dropdown-menu hidden" id="records-dropdown-menu">
+          <button class="tab dropdown-item" data-view="records">Overall Records</button>
+          <button class="tab dropdown-item" data-view="slams">Slam History</button>
+          <button class="tab dropdown-item" data-view="thousands">WATP 1000 History</button>
+        </div>
+      </div>
       <button class="tab" data-view="h2h">Head to Head</button>
     </nav>
     <div class="picker-wrap" id="global-search-wrap">
@@ -171,6 +177,26 @@
         <tr id="slams-thead-row"><th>#</th><th>Player</th><th>Country</th><th data-slam-sort-col="QF" class="sortable-th">QF</th><th data-slam-sort-col="SF" class="sortable-th">SF</th><th data-slam-sort-col="F" class="sortable-th">F</th><th data-slam-sort-col="W" class="sortable-th">Titles</th><th></th></tr>
       </thead>
       <tbody id="slams-body"></tbody>
+    </table>
+  </section>
+
+  <section class="view hidden" id="view-thousands">
+    <div class="view-head">
+      <h2>WATP 1000 History</h2>
+    </div>
+    <p class="rankings-rule-note">Career WATP 1000 appearances — reaching a later round always counts toward the earlier ones too (a finalist has also reached the quarterfinal and semifinal that trip).</p>
+
+    <div class="mode-toggle mode-toggle-1000" id="thousands-filter-toggle"></div>
+
+    <div id="thousands-empty" class="empty hidden">
+      <p>No WATP 1000 results yet.</p>
+      <p class="empty-sub">This fills in once results start coming in for a WATP 1000-level tournament.</p>
+    </div>
+    <table class="data-table" id="thousands-table">
+      <thead>
+        <tr id="thousands-thead-row"><th>#</th><th>Player</th><th>Country</th><th data-thousands-sort-col="QF" class="sortable-th">QF</th><th data-thousands-sort-col="SF" class="sortable-th">SF</th><th data-thousands-sort-col="F" class="sortable-th">F</th><th data-thousands-sort-col="W" class="sortable-th">Titles</th></tr>
+      </thead>
+      <tbody id="thousands-body"></tbody>
     </table>
   </section>
 

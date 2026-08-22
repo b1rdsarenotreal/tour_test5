@@ -4148,6 +4148,90 @@ function renderGrandSlamHistory(){
   )).join("");
 }
 
+/* ---------------- WATP 1000 History (same shape as Slam History, no manual additions) ---------------- */
+function computeThousandsCareerStats(tournamentName){
+  const stats = new Map();
+  state.players.forEach(p => stats.set(p.id, {QF:0, SF:0, F:0, W:0}));
+  const idxQF = ROUND_ORDER.indexOf("QF");
+  const idxSF = ROUND_ORDER.indexOf("SF");
+  const idxF = ROUND_ORDER.indexOf("F");
+
+  state.tournaments
+    .filter(t => t.level === "WTA1000" && (tournamentName == null || t.name === tournamentName))
+    .forEach(t => {
+      const results = computeTournamentResults(t.id);
+      results.forEach((res, pid) => {
+        const s = stats.get(pid);
+        if(!s) return;
+        if(res.code === "W"){
+          s.QF++; s.SF++; s.F++; s.W++;
+        } else {
+          const idx = ROUND_ORDER.indexOf(res.code);
+          if(idx >= idxQF) s.QF++;
+          if(idx >= idxSF) s.SF++;
+          if(idx >= idxF) s.F++;
+        }
+      });
+    });
+  return stats;
+}
+
+let thousandsFilter = "TOTAL";
+
+function populateThousandsFilterToggle(){
+  const names = Array.from(new Set(state.tournaments.filter(t => t.level === "WTA1000").map(t => t.name))).sort();
+  const toggle = $("#thousands-filter-toggle");
+  toggle.innerHTML = '<button class="mode-btn" data-thousands-filter="TOTAL">Total</button>' +
+    names.map(n => '<button class="mode-btn" data-thousands-filter="' + escapeHtml(n) + '">' + escapeHtml(n) + '</button>').join("");
+  $all("[data-thousands-filter]").forEach(btn => btn.classList.toggle("active", btn.dataset.thousandsFilter === thousandsFilter));
+}
+
+let thousandsSortCol = "W";
+
+function renderThousandsHistory(){
+  populateThousandsFilterToggle();
+  const isTotal = thousandsFilter === "TOTAL";
+  const computed = computeThousandsCareerStats(isTotal ? null : thousandsFilter);
+
+  const rows = state.players
+    .map(p => ({p, s: computed.get(p.id) || {QF:0, SF:0, F:0, W:0}}))
+    .filter(r => r.s.QF > 0);
+
+  const metricOrder = ["W", "F", "SF", "QF"].filter(m => m !== thousandsSortCol);
+  rows.sort((a,b) =>
+    b.s[thousandsSortCol] - a.s[thousandsSortCol] ||
+    b.s[metricOrder[0]] - a.s[metricOrder[0]] ||
+    b.s[metricOrder[1]] - a.s[metricOrder[1]] ||
+    b.s[metricOrder[2]] - a.s[metricOrder[2]] ||
+    a.p.name.localeCompare(b.p.name));
+
+  const table = $("#thousands-table");
+  const empty = $("#thousands-empty");
+  if(rows.length === 0){
+    table.classList.add("hidden");
+    empty.classList.remove("hidden");
+    return;
+  }
+  table.classList.remove("hidden");
+  empty.classList.add("hidden");
+
+  $all("#thousands-thead-row [data-thousands-sort-col]").forEach(th => {
+    th.classList.toggle("sort-active", th.dataset.thousandsSortCol === thousandsSortCol);
+  });
+
+  $("#thousands-body").innerHTML = rows.map((r, i) => (
+    '<tr>' +
+    '<td class="record-rank-cell">' + (i + 1) + '</td>' +
+    '<td><button class="player-link" data-open-player="' + r.p.id + '">' + flagImgHTML(r.p.country) + escapeHtml(r.p.name) + '</button></td>' +
+    '<td class="country-chip">' + (r.p.country ? escapeHtml(r.p.country.toUpperCase()) : "—") + '</td>' +
+    '<td>' + r.s.QF + '</td>' +
+    '<td>' + r.s.SF + '</td>' +
+    '<td>' + r.s.F + '</td>' +
+    '<td class="points-cell">' + r.s.W + '</td>' +
+    '</tr>'
+  )).join("");
+}
+
 /* ---------------- Historical Grand Slam record (manual, purely additive) ---------------- */
 // Reads a player's historical entries safely regardless of which shape is
 // stored — a fresh save is always the new per-major array, but any player
@@ -4660,6 +4744,10 @@ function handleDeleteTournament(id){
 /* ---------------- Tab / view switching ---------------- */
 function switchView(view){
   $all(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === view));
+  // The dropdown toggle itself has no data-view (it just opens the menu),
+  // so it needs its own check — it should read as "active" whenever any of
+  // its three sub-pages is the one currently showing.
+  $("#records-dropdown-toggle").classList.toggle("active", view === "records" || view === "slams" || view === "thousands");
   $all(".view").forEach(v => v.classList.toggle("hidden", v.id !== "view-" + view));
   if(view !== "tourney-history") currentTourneyHistoryName = null;
   if(view === "rankings") renderRankings();
@@ -4667,6 +4755,7 @@ function switchView(view){
   if(view === "tournaments") renderTournaments();
   if(view === "records") renderRecords();
   if(view === "slams") renderGrandSlamHistory();
+  if(view === "thousands") renderThousandsHistory();
   if(view === "h2h") renderHeadToHead();
 }
 
@@ -4730,7 +4819,22 @@ function handleImportFileSelected(e){
 
 /* ---------------- Wire up events ---------------- */
 document.addEventListener("DOMContentLoaded", () => {
-  $all(".tab").forEach(tab => tab.addEventListener("click", () => switchView(tab.dataset.view)));
+  // Only tabs with a real destination switch views directly — the Records
+  // dropdown's own toggle button is styled the same but has no data-view
+  // (it just opens/closes the menu), so it needs to be excluded here or
+  // clicking it would try to switch to a view named "undefined".
+  $all(".tab").forEach(tab => tab.addEventListener("click", () => { if(tab.dataset.view) switchView(tab.dataset.view); }));
+
+  $("#records-dropdown-toggle").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("#records-dropdown-menu").classList.toggle("hidden");
+  });
+  $("#records-dropdown-menu").addEventListener("click", (e) => {
+    if(e.target.closest("[data-view]")) $("#records-dropdown-menu").classList.add("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if(!e.target.closest("#records-dropdown")) $("#records-dropdown-menu").classList.add("hidden");
+  });
 
   $("#rankings-year").addEventListener("change", renderRankings);
 
@@ -4882,6 +4986,12 @@ document.addEventListener("DOMContentLoaded", () => {
     slamFilter = btn.dataset.slamFilter;
     renderGrandSlamHistory();
   });
+  $("#thousands-filter-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-thousands-filter]");
+    if(!btn) return;
+    thousandsFilter = btn.dataset.thousandsFilter;
+    renderThousandsHistory();
+  });
 
   $("#open-add-slam-history").addEventListener("click", () => openEditSlamHistory(null));
   $("#esh-cancel").addEventListener("click", closeEditSlamHistory);
@@ -4926,6 +5036,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if(slamSortTh){
       slamHistorySortCol = slamSortTh.dataset.slamSortCol;
       renderGrandSlamHistory();
+      return;
+    }
+    const thousandsSortTh = e.target.closest("[data-thousands-sort-col]");
+    if(thousandsSortTh){
+      thousandsSortCol = thousandsSortTh.dataset.thousandsSortCol;
+      renderThousandsHistory();
       return;
     }
     const bracketBtn = e.target.closest("[data-open-bracket]");
