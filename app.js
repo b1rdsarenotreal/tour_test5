@@ -571,6 +571,19 @@ function officialRankingsAsOf(mondayW){
   return computeRankingsAsOf(mondayW - 7 * MS_PER_DAY);
 }
 
+// Every feature that needs "the official rank of every player as of some
+// week" should call this, not build the two pieces separately — retirement
+// has to be excluded against the same effective (already-shifted) date the
+// totals themselves were computed against, and forgetting that second half
+// is exactly what caused every retired player to silently inflate everyone
+// below them by one spot across Entry List, Seeding, Auto-Fill, Generate
+// Field, and Finals auto-seed, while the main Rankings table (which always
+// applied both halves together) stayed correct.
+function officialRanksAsOf(mondayW){
+  const effectiveAsOf = mondayW - 7 * MS_PER_DAY;
+  return ranksFromTotals(computeRankingsAsOf(effectiveAsOf), effectiveAsOf);
+}
+
 // The actual counting rule: every mandatory result counts no matter how
 // many there are, then the best remaining (non-mandatory) results fill out
 // the rest of the cap.
@@ -1200,7 +1213,7 @@ function getTop10WinsForPlayer(playerId){
     const t = tournamentById(m.tournamentId);
     if(!t) return;
     const weekMonday = mondayOf(tournamentDateMs(t));
-    const rankMap = ranksFromTotals(officialRankingsAsOf(weekMonday));
+    const rankMap = officialRanksAsOf(weekMonday);
     const opponentRank = rankMap[opponentId];
     if(!opponentRank || opponentRank > 10) return;
     const ownRankAtTime = rankMap[playerId] || null;
@@ -1225,7 +1238,7 @@ function computeTop10WinsCounts(){
     const t = tournamentById(m.tournamentId);
     if(!t) return;
     const weekMonday = mondayOf(tournamentDateMs(t));
-    const rankMap = ranksFromTotals(officialRankingsAsOf(weekMonday));
+    const rankMap = officialRanksAsOf(weekMonday);
     const opponentRank = rankMap[opponentId];
     if(opponentRank && opponentRank <= 10){
       counts.set(winnerId, counts.get(winnerId) + 1);
@@ -1356,7 +1369,7 @@ function grandSlamGridHTML(playerId){
 function computePlayerPeakRank(playerId){
   let peak = null;
   getRankingSnapshotDates().forEach(d => {
-    const rankMap = ranksFromTotals(officialRankingsAsOf(d));
+    const rankMap = officialRanksAsOf(d);
     const r = rankMap[playerId];
     if(r && (peak === null || r < peak)) peak = r;
   });
@@ -1418,7 +1431,7 @@ function renderPlayerProfile(playerId){
   const snapshotDates = getRankingSnapshotDates();
   const history = [];
   snapshotDates.forEach(d => {
-    const rankMap = ranksFromTotals(officialRankingsAsOf(d));
+    const rankMap = officialRanksAsOf(d);
     if(rankMap[playerId]) history.push({date: d, rank: rankMap[playerId]});
   });
   const peakRank = history.length ? Math.min(...history.map(h => h.rank)) : null;
@@ -2277,7 +2290,7 @@ function renderFinalsGroupSetup(t){
   const seedMsg = el("span", {class:"form-msg"}, []);
   autoSeedBtn.addEventListener("click", () => {
     const asOf = rankingDateFromSelectValue(dateSelect.value);
-    const ranks = ranksFromTotals(officialRankingsAsOf(asOf));
+    const ranks = officialRanksAsOf(asOf);
     const used = new Set((t.seeds || []).filter(Boolean));
     const committedElsewhere = playersCommittedInWeek(mondayOf(tournamentDateMs(t)), t.id);
     const candidates = state.players
@@ -3283,7 +3296,7 @@ function handleAutofillMain(){
   const qualSlots = t.qualifying.enabled ? t.qualifying.numQualifiers : 0;
   const directSlots = Math.max(0, t.drawSize - qualSlots);
 
-  const entryRanks = ranksFromTotals(officialRankingsAsOf(entryDate));
+  const entryRanks = officialRanksAsOf(entryDate);
   const alreadyUsed = new Set([...(t.seeds || []).filter(Boolean), ...(t.unseededEntrants || [])]);
   const committedElsewhere = playersCommittedInWeek(mondayOf(tournamentDateMs(t)), t.id);
   const fieldCandidates = state.players
@@ -3295,7 +3308,7 @@ function handleAutofillMain(){
   const openUnseededCount = Math.max(0, directSlots - t.seeds.filter(Boolean).length - (t.unseededEntrants||[]).length);
 
   const field = fieldCandidates.slice(0, openSeedSlots.length + openUnseededCount);
-  const seedRanks = ranksFromTotals(officialRankingsAsOf(seedDate));
+  const seedRanks = officialRanksAsOf(seedDate);
   const reranked = field.slice().sort((a,b) => (seedRanks[a.id] || 99999) - (seedRanks[b.id] || 99999) || a.name.localeCompare(b.name));
 
   let filled = 0;
@@ -3323,7 +3336,7 @@ function handleAutofillQual(){
   const qualSlots = t.qualifying.numQualifiers * Math.pow(2, t.qualifying.numRounds);
   const directSlots = Math.max(0, t.drawSize - t.qualifying.numQualifiers);
 
-  const entryRanks = ranksFromTotals(officialRankingsAsOf(entryDate));
+  const entryRanks = officialRanksAsOf(entryDate);
   const usedInMain = new Set([...(t.seeds || []).filter(Boolean), ...(t.unseededEntrants || [])]);
   const usedInQual = new Set(t.qualifying.entrants || []);
   const committedElsewhere = playersCommittedInWeek(mondayOf(tournamentDateMs(t)), t.id);
@@ -3353,8 +3366,8 @@ function renderEntryListBody(t){
   // will use, before you actually run them.
   const entryDate = rankingDateFromSelectValue($("#bracket-entry-date").value);
   const seedDate = rankingDateFromSelectValue($("#bracket-seed-date").value);
-  const entryRanks = ranksFromTotals(officialRankingsAsOf(entryDate));
-  const seedRanks = ranksFromTotals(officialRankingsAsOf(seedDate));
+  const entryRanks = officialRanksAsOf(entryDate);
+  const seedRanks = officialRanksAsOf(seedDate);
 
   const pickerWrap = el("div", {class:"picker-wrap"});
   pickerWrap.appendChild(el("input", {type:"text", class:"picker-input", "data-entrylist-search":"1", autocomplete:"off", placeholder:"Search player to add to entry list…"}));
@@ -3502,7 +3515,7 @@ function handleGenerateField(){
   msg.className = "form-msg";
 
   const entryDate = rankingDateFromSelectValue($("#bracket-entry-date").value);
-  const ranks = ranksFromTotals(officialRankingsAsOf(entryDate));
+  const ranks = officialRanksAsOf(entryDate);
   const weekMonday = mondayOf(tournamentDateMs(t));
   const committedElsewhere = playersCommittedInWeek(weekMonday, t.id);
   const alreadyOnList = new Set((t.entryList || []).map(e => e.playerId));
@@ -3561,7 +3574,7 @@ function handleProcessEntryList(){
     return;
   }
 
-  const entryRanks = ranksFromTotals(officialRankingsAsOf(entryDate));
+  const entryRanks = officialRanksAsOf(entryDate);
   const regularSorted = regular.slice().sort((a,b) =>
     (entryRanks[a] || 999999) - (entryRanks[b] || 999999) ||
     (playerById(a) ? playerById(a).name : "").localeCompare(playerById(b) ? playerById(b).name : ""));
@@ -3577,7 +3590,7 @@ function handleProcessEntryList(){
   const mainField = [...mainWCs, ...mainPRs, ...mainDirect];
   const qualField = [...qualWCs, ...qualPRs, ...qualDirect];
 
-  const seedRanks = ranksFromTotals(officialRankingsAsOf(seedDate));
+  const seedRanks = officialRanksAsOf(seedDate);
   const mainSorted = mainField.slice().sort((a,b) =>
     (seedRanks[a] || 999999) - (seedRanks[b] || 999999) ||
     (playerById(a) ? playerById(a).name : "").localeCompare(playerById(b) ? playerById(b).name : ""));
@@ -3927,7 +3940,7 @@ function computeHistoryRecords(){
   const weeksInTop10 = new Map();
   state.players.forEach(p => { weeksAtNo1.set(p.id, 0); weeksInTop10.set(p.id, 0); });
   weeks.forEach(w => {
-    const ranks = ranksFromTotals(officialRankingsAsOf(w));
+    const ranks = officialRanksAsOf(w);
     Object.keys(ranks).forEach(pid => {
       const r = ranks[pid];
       if(r === 1) weeksAtNo1.set(pid, (weeksAtNo1.get(pid) || 0) + 1);
