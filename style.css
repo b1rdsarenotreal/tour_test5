@@ -580,6 +580,24 @@ form textarea{
 .rank-move.flat{color: var(--ink-soft);}
 .rank-chart{margin: 12px 0 4px; max-width: 560px;}
 .rank-chart svg{width:100%; height:auto; display:block;}
+.rank-chart-hit{cursor: pointer;}
+.rank-chart-hit:hover + .rank-chart-dot{r: 6;}
+.chart-tooltip{
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background: var(--ink);
+  color: var(--paper);
+  font-family:'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 200;
+  white-space: nowrap;
+  text-align: center;
+}
+.chart-tooltip-hint{color: var(--ball); font-size: 9px;}
 .bio-grid{
   display:grid; grid-template-columns: repeat(auto-fit, minmax(110px,1fr));
   gap: 8px; margin-bottom: 18px;
@@ -679,7 +697,7 @@ form textarea{
   padding: 26px;
 }
 .modal h3{font-size: 20px; margin-bottom: 18px;}
-#player-modal{max-width: 1800px;}
+#player-modal{max-width: 1400px;}
 
 /* Player profile modal contents */
 .profile-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 18px;}

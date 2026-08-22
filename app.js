@@ -1603,21 +1603,45 @@ function renderRankHistorySVG(history){
   const maxRank = Math.max(...history.map(h => h.rank), 5);
   const minRank = 1;
   const innerW = w - padL - padR, innerH = h - padT - padB;
+  const baseline = h - padB;
   const xFor = (i) => padL + (history.length === 1 ? innerW / 2 : (i / (history.length - 1)) * innerW);
   const yFor = (rank) => padT + ((rank - minRank) / Math.max(1, (maxRank - minRank))) * innerH;
 
   const points = history.map((pt, i) => xFor(i) + "," + yFor(pt.rank)).join(" ");
+
+  // Soft gradient fill under the line — purely decorative, gives the chart
+  // some visual weight instead of reading as a bare line.
+  const areaPoints = points + " " + xFor(history.length - 1) + "," + baseline + " " + xFor(0) + "," + baseline;
+  const gradientId = "rankFill" + Math.random().toString(36).slice(2, 8);
+  const areaFill = '<defs><linearGradient id="' + gradientId + '" x1="0" y1="0" x2="0" y2="1">' +
+    '<stop offset="0%" stop-color="var(--ball)" stop-opacity="0.22"></stop>' +
+    '<stop offset="100%" stop-color="var(--ball)" stop-opacity="0"></stop>' +
+    '</linearGradient></defs>' +
+    '<polygon points="' + areaPoints + '" fill="url(#' + gradientId + ')"></polygon>';
+
+  // The single best (lowest-numbered) week gets a gold ring, and the most
+  // recent week gets a highlighted blue dot — two quick visual landmarks
+  // instead of a flat, undifferentiated row of identical dots.
+  const peakIdx = history.reduce((best, pt, i) => pt.rank < history[best].rank ? i : best, 0);
+  const lastIdx = history.length - 1;
+
   // A slightly larger hit-area sits behind each visible dot so the tooltip
-  // is easy to trigger on hover, not just on the tiny 3px point. It needs
+  // and click target are easy to hit, not just the tiny 3px point. It needs
   // pointer-events="all" explicitly — an SVG shape with a transparent fill
   // doesn't register hover/pointer events by default, only a painted one
-  // would, so without this the tooltip would never actually fire.
-  const dots = history.map((pt, i) =>
-    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="8" fill="transparent" pointer-events="all">' +
-      '<title>Week of ' + formatWeekDate(pt.date) + ': No. ' + pt.rank + '</title>' +
-    '</circle>' +
-    '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="3" fill="var(--ink)" pointer-events="none"></circle>'
-  ).join("");
+  // would, so without this nothing would ever fire.
+  const dots = history.map((pt, i) => {
+    const prevRank = i > 0 ? history[i-1].rank : null;
+    const delta = prevRank === null ? "" : prevRank === pt.rank ? "No change" : prevRank > pt.rank ? "\u25b2 Up " + (prevRank - pt.rank) : "\u25bc Down " + (pt.rank - prevRank);
+    const isPeak = i === peakIdx;
+    const isLast = i === lastIdx;
+    const visibleR = isLast ? 5 : isPeak ? 4 : 3;
+    const visibleFill = isLast ? "var(--ball)" : isPeak ? "#D4A017" : "var(--ink)";
+    return '<circle class="rank-chart-hit" cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="9" fill="transparent" pointer-events="all" ' +
+        'data-chart-week="' + pt.date + '" data-chart-rank="' + pt.rank + '" data-chart-delta="' + escapeHtml(delta) + '"></circle>' +
+      '<circle class="rank-chart-dot" cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="' + visibleR + '" fill="' + visibleFill + '" pointer-events="none"></circle>' +
+      (isPeak ? '<circle cx="' + xFor(i) + '" cy="' + yFor(pt.rank) + '" r="6.5" fill="none" stroke="#D4A017" stroke-width="1.5" pointer-events="none"></circle>' : "");
+  }).join("");
 
   const gridLines = [minRank, Math.round((minRank+maxRank)/2), maxRank].map(r =>
     '<line x1="' + padL + '" y1="' + yFor(r) + '" x2="' + (w-padR) + '" y2="' + yFor(r) + '" stroke="var(--line)" stroke-width="1"></line>' +
@@ -1640,6 +1664,7 @@ function renderRankHistorySVG(history){
   ).join("");
 
   return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+    areaFill +
     gridLines +
     yearMarkersHTML +
     '<polyline points="' + points + '" fill="none" stroke="var(--ink)" stroke-width="2"></polyline>' +
@@ -4786,6 +4811,46 @@ document.addEventListener("DOMContentLoaded", () => {
     if(!e.target.closest(".picker-wrap")){
       $all(".picker-suggestions").forEach(s => s.classList.add("hidden"));
     }
+  });
+
+  // Rank-history chart: a custom tooltip on hover (styled, instant, unlike
+  // the browser's native title tooltip) and clicking a point jumps straight
+  // to that week's full Rankings table for context on who else was around
+  // them that week.
+  function chartTooltipEl(){
+    let tip = document.getElementById("chart-tooltip");
+    if(!tip){
+      tip = document.createElement("div");
+      tip.id = "chart-tooltip";
+      tip.className = "chart-tooltip hidden";
+      document.body.appendChild(tip);
+    }
+    return tip;
+  }
+  document.addEventListener("mouseover", (e) => {
+    const pt = e.target.closest(".rank-chart-hit");
+    if(!pt) return;
+    const tip = chartTooltipEl();
+    const week = Number(pt.dataset.chartWeek);
+    const rank = pt.dataset.chartRank;
+    const delta = pt.dataset.chartDelta;
+    tip.innerHTML = '<b>No. ' + rank + '</b><br>' + formatWeekDate(week) + (delta ? '<br>' + delta : '') + '<br><span class="chart-tooltip-hint">Click for full rankings</span>';
+    const rect = pt.getBoundingClientRect();
+    tip.style.left = (rect.left + rect.width / 2) + "px";
+    tip.style.top = (rect.top - 8) + "px";
+    tip.classList.remove("hidden");
+  });
+  document.addEventListener("mouseout", (e) => {
+    if(e.target.closest(".rank-chart-hit")) chartTooltipEl().classList.add("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    const pt = e.target.closest(".rank-chart-hit");
+    if(!pt) return;
+    const week = mondayOf(Number(pt.dataset.chartWeek));
+    closePlayerModal();
+    switchView("rankings");
+    $("#rankings-year").value = "week:" + week;
+    renderRankings();
   });
 
   $("#rankings-search").addEventListener("input", renderRankings);
