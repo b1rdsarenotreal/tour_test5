@@ -1740,6 +1740,20 @@ function closePlayerModal(){
 /* ---------------- Tournaments view ---------------- */
 // Groups a tournament's results into who reached each stage — used by the
 // season calendar view (champion / runner-up / semifinalists / quarterfinalists).
+// Whoever won this exact tournament name last year, regardless of their
+// current status (retired, no longer entered, etc.) — a defending champion
+// is a historical fact about the previous edition, not a claim about who's
+// still active.
+function getDefendingChampion(t){
+  const prevEdition = state.tournaments.find(t2 => t2.name === t.name && t2.year === t.year - 1);
+  if(!prevEdition) return null;
+  const results = computeTournamentResults(prevEdition.id);
+  for(const [pid, res] of results){
+    if(res.code === "W") return {player: playerById(pid), edition: prevEdition};
+  }
+  return null;
+}
+
 function getTournamentResultsByRound(t){
   const results = computeTournamentResults(t.id);
   const champion = [], runnerUp = [], semifinalists = [], quarterfinalists = [];
@@ -2788,14 +2802,18 @@ function renderBracketPage(){
 
   const head = $("#bracket-head");
   head.innerHTML = "";
+  const defChamp = getDefendingChampion(t);
   head.appendChild(el("div", {}, [
     el("h2", {}, [t.name]),
     el("div", {class:"profile-meta"}, [
       (t.location ? t.location + " · " : "") +
       (LEVEL_LABELS[t.level] || t.level) + " · " + t.surface + " · " + (t.startDate || t.year) +
       " · Draw of " + t.drawSize + (nByes ? " (" + cap + "-slot bracket, " + nByes + " bye" + (nByes===1?"":"s") + ")" : "")
-    ])
-  ]));
+    ]),
+    defChamp && defChamp.player ? el("div", {class:"defending-champ-line", html:
+      '\uD83C\uDFC6 Defending Champion: ' + playerLinkHTML(defChamp.player) + ' (' + defChamp.edition.year + ')'
+    }) : null
+  ].filter(Boolean)));
   const controls = el("div", {class:"controls"});
   const sizeLabel = el("label", {}, ["Draw size"]);
   const sizeSelect = el("select");
@@ -3937,6 +3955,15 @@ function buildBracketMatchCard(t, m){
   card.appendChild(buildSlotRow(m.slotA, m, "A", t));
   card.appendChild(buildSlotRow(m.slotB, m, "B", t));
 
+  if(m.slotA.type === "player" && m.slotB.type === "player"){
+    const h2hBtn = el("button", {type:"button", class:"h2h-badge", title:"View head-to-head record"}, ["H2H"]);
+    h2hBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openH2HPopup(m.slotA.playerId, m.slotB.playerId);
+    });
+    card.appendChild(h2hBtn);
+  }
+
   if(m.status === "ready"){
     card.appendChild(buildBracketEntryForm(t, m));
   } else if(m.status === "played"){
@@ -4070,6 +4097,109 @@ function computeHistoryRecords(){
     });
   });
   return {weeksAtNo1, weeksInTop10};
+}
+
+// Every stint at No. 1, in chronological order — same week series and same
+// per-week ranking calculation as computeHistoryRecords, so the totals here
+// always sum to exactly the same "weeks at No. 1" figure shown elsewhere.
+// "no" (the leaderboard-style numbering) only increments the first time a
+// given player ever reaches No. 1; every later stint by that same player
+// keeps their original number and just gets an occurrence count instead —
+// same convention as the classic "list of WTA no. 1 players" tables.
+function computeNo1ReignHistory(){
+  const weeks = getAllWeeklySeries();
+  const reigns = [];
+  let currentPlayerId = null, reignStartIdx = null;
+
+  weeks.forEach((w, i) => {
+    const ranks = officialRanksAsOf(w);
+    let no1Id = null;
+    Object.keys(ranks).forEach(pid => { if(ranks[pid] === 1) no1Id = pid; });
+    if(no1Id !== currentPlayerId){
+      if(currentPlayerId !== null) reigns.push({playerId: currentPlayerId, startIdx: reignStartIdx, endIdx: i - 1});
+      currentPlayerId = no1Id;
+      reignStartIdx = i;
+    }
+  });
+  if(currentPlayerId !== null) reigns.push({playerId: currentPlayerId, startIdx: reignStartIdx, endIdx: weeks.length - 1});
+
+  const firstAppearanceOrder = [];
+  const occurrenceCount = {};
+  const cumulativeWeeks = {};
+
+  return reigns.map(r => {
+    const weeksInReign = r.endIdx - r.startIdx + 1;
+    occurrenceCount[r.playerId] = (occurrenceCount[r.playerId] || 0) + 1;
+    cumulativeWeeks[r.playerId] = (cumulativeWeeks[r.playerId] || 0) + weeksInReign;
+    let no = null;
+    if(!firstAppearanceOrder.includes(r.playerId)){
+      firstAppearanceOrder.push(r.playerId);
+      no = firstAppearanceOrder.length;
+    }
+    return {
+      no,
+      playerId: r.playerId,
+      occurrence: occurrenceCount[r.playerId],
+      startWeek: weeks[r.startIdx],
+      endWeek: weeks[r.endIdx],
+      weeksInReign,
+      cumulativeTotal: cumulativeWeeks[r.playerId]
+    };
+  });
+}
+
+// Same row shape as renderRecordListInto, but without the top-10 cap — for
+// the dedicated Ranking History page, which exists specifically to show
+// the full list.
+function renderRecordListFullInto(container, map, unitLabel){
+  container.innerHTML = "";
+  const rows = Array.from(map.entries())
+    .map(([pid, count]) => ({p: playerById(pid), count}))
+    .filter(r => r.p && r.count > 0)
+    .sort((a,b) => b.count - a.count || a.p.name.localeCompare(b.p.name));
+  if(rows.length === 0){
+    container.appendChild(el("p", {class:"picker-empty-note"}, ["No data yet."]));
+    return;
+  }
+  rows.forEach((r, i) => {
+    container.appendChild(el("div", {class:"record-row"}, [
+      el("span", {class:"record-rank"}, [String(i+1)]),
+      el("span", {class:"record-name", html: playerLinkHTML(r.p)}),
+      el("span", {class:"record-count"}, [String(r.count) + " " + unitLabel])
+    ]));
+  });
+}
+
+function renderRankHistoryPage(){
+  const {weeksAtNo1, weeksInTop10} = computeHistoryRecords();
+  renderRecordListFullInto($("#rh-weeks-no1-list"), weeksAtNo1, "wks");
+  renderRecordListFullInto($("#rh-weeks-top10-list"), weeksInTop10, "wks");
+
+  const reigns = computeNo1ReignHistory();
+  const table = $("#rh-no1-table");
+  const empty = $("#rh-no1-empty");
+  if(reigns.length === 0){
+    table.classList.add("hidden");
+    empty.classList.remove("hidden");
+    return;
+  }
+  table.classList.remove("hidden");
+  empty.classList.add("hidden");
+
+  $("#rh-no1-body").innerHTML = reigns.map(r => {
+    const p = playerById(r.playerId);
+    if(!p) return "";
+    const nameCell = flagImgHTML(p.country) + '<button class="player-link" data-open-player="' + p.id + '">' + escapeHtml(p.name) + '</button>' +
+      (r.occurrence > 1 ? ' <span class="rh-occurrence">(' + r.occurrence + ')</span>' : "");
+    return '<tr' + (r.no ? ' class="rh-first-row"' : '') + '>' +
+      '<td class="record-rank-cell">' + (r.no || "") + '</td>' +
+      '<td>' + nameCell + '</td>' +
+      '<td>' + formatWeekDate(r.startWeek) + '</td>' +
+      '<td>' + formatWeekDate(r.endWeek) + '</td>' +
+      '<td>' + r.weeksInReign + '</td>' +
+      '<td class="points-cell">' + r.cumulativeTotal + '</td>' +
+      '</tr>';
+  }).join("");
 }
 
 function computeTitlesByLevel(){
@@ -4564,6 +4694,56 @@ function computeHeadToHead(idA, idB){
   return {matches, winsA, winsB, surfaceStats};
 }
 
+// A quick H2H popup for two players about to face off (or who already have)
+// in a bracket, without leaving the bracket page — reuses computeHeadToHead
+// (same source of truth as the full Head to Head page) and the existing
+// general-purpose player modal, so there's no separate modal to maintain.
+function openH2HPopup(idA, idB){
+  const pA = playerById(idA), pB = playerById(idB);
+  if(!pA || !pB) return;
+  const {matches, winsA, winsB, surfaceStats} = computeHeadToHead(idA, idB);
+
+  const modal = $("#player-modal");
+  modal.innerHTML = "";
+  modal.appendChild(el("h3", {}, ["Head to Head"]));
+  modal.appendChild(el("div", {class:"h2h-header", html:
+    '<span class="h2h-name">' + playerNameHTML(pA) + '</span>' +
+    '<span class="h2h-score">' + winsA + '\u2013' + winsB + '</span>' +
+    '<span class="h2h-name">' + playerNameHTML(pB) + '</span>'
+  }));
+
+  const surfaceRow = el("div", {class:"profile-stats"}, ["hard","clay","grass"].map(s =>
+    el("div", {class:"stat-box"}, [
+      el("div", {class:"stat-num"}, [surfaceStats[s].a + "\u2013" + surfaceStats[s].b]),
+      el("div", {class:"stat-label"}, [s])
+    ])
+  ));
+  modal.appendChild(surfaceRow);
+
+  modal.appendChild(el("div", {class:"profile-section-title"}, ["All Meetings"]));
+  if(matches.length === 0){
+    modal.appendChild(el("p", {}, ["No previous meetings."]));
+  } else {
+    matches.forEach(m => {
+      const t = tournamentById(m.tournamentId);
+      const winner = playerById(m.winnerId);
+      const row = el("div", {class:"tourney-row"}, [
+        el("span", {class:"tourney-name"}, [t ? (t.name + " '" + String(t.year).slice(-2)) : ""]),
+        el("span", {class:"tourney-champ", html: (winner ? playerLinkHTML(winner) : "(unknown)") + " won"}),
+        el("span", {html: renderScoreboardHTML(m)})
+      ]);
+      modal.appendChild(row);
+    });
+  }
+
+  modal.appendChild(el("div", {class:"modal-close-row"}, [
+    el("span", {}),
+    el("button", {class:"btn btn-ghost", id:"profile-close"}, ["Close"])
+  ]));
+  $("#player-modal-backdrop").classList.remove("hidden");
+  $("#profile-close").addEventListener("click", closePlayerModal);
+}
+
 function renderHeadToHead(){
   buildH2HPicker("A");
   buildH2HPicker("B");
@@ -4869,13 +5049,14 @@ function switchView(view){
   // The dropdown toggle itself has no data-view (it just opens the menu),
   // so it needs its own check — it should read as "active" whenever any of
   // its three sub-pages is the one currently showing.
-  $("#records-dropdown-toggle").classList.toggle("active", view === "records" || view === "slams" || view === "thousands");
+  $("#records-dropdown-toggle").classList.toggle("active", view === "records" || view === "rank-history" || view === "slams" || view === "thousands");
   $all(".view").forEach(v => v.classList.toggle("hidden", v.id !== "view-" + view));
   if(view !== "tourney-history") currentTourneyHistoryName = null;
   if(view === "rankings") renderRankings();
   if(view === "players") renderPlayers();
   if(view === "tournaments") renderTournaments();
   if(view === "records") renderRecords();
+  if(view === "rank-history") renderRankHistoryPage();
   if(view === "slams") renderGrandSlamHistory();
   if(view === "thousands") renderThousandsHistory();
   if(view === "h2h") renderHeadToHead();

@@ -742,6 +742,13 @@ form textarea{
   color: var(--ink-soft);
   margin-top: 4px;
 }
+.defending-champ-line{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #D4A017;
+  margin-top: 6px;
+}
 .profile-stats{
   display:grid; grid-template-columns: repeat(3,1fr); gap: 10px;
   margin-bottom: 22px;
@@ -934,6 +941,22 @@ form textarea{
 }
 .bracket-match:hover .clear-x{opacity: 1;}
 .clear-x:hover{background: var(--clay); border-color: var(--clay); color: white;}
+.h2h-badge{
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  font-family:'JetBrains Mono', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.h2h-badge:hover{background: var(--ball); color: white; border-color: var(--ball);}
 .bracket-slot{
   display:flex; align-items:center; justify-content:space-between;
   gap: 6px;
@@ -1380,6 +1403,8 @@ form textarea{
   width: 18px;
   flex-shrink: 0;
 }
+.rh-occurrence{color: var(--ink-soft); font-size: 11px; font-weight: 400;}
+.rh-first-row{background: var(--paper-2);}
 .record-rank-cell{
   font-family:'JetBrains Mono', monospace;
   color: var(--ink-soft);
