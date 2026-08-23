@@ -279,15 +279,6 @@ main.wrap{padding-top: 32px; padding-bottom: 80px;}
   font-weight: 700;
   font-size: 15px;
 }
-.titles-cell{
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  max-width: 160px;
-}
-.trophy-icon{color: #D4A017; cursor: default; display: inline-flex;}
-.trophy-icon:hover{color: var(--ball);}
 
 /* ---------- Player cards ---------- */
 .player-grid{

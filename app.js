@@ -889,51 +889,6 @@ function renderBreakdownTableHTML(playerId, asOfMs){
 let expandedRankingRow = null;
 let rankingsMode = "live"; // "live" | "official"
 
-// Same "which tournaments count" window as whichever rankings view is
-// currently showing (rolling 52-week, a specific season, or all-time) — so
-// the trophy list always lines up exactly with the existing titles count,
-// not some independently-defined notion of "recent."
-function getIncludedTournamentsForRankingsView(val, effectiveAsOf){
-  if(val === "current" || val.startsWith("week:")){
-    const windowStart = effectiveAsOf - 364 * MS_PER_DAY;
-    return state.tournaments.filter(t => {
-      const d = tournamentDateMs(t);
-      return d <= effectiveAsOf && d > windowStart;
-    });
-  }
-  if(val.startsWith("year:")){
-    const year = Number(val.slice(5));
-    return state.tournaments.filter(t => t.year === year);
-  }
-  return state.tournaments;
-}
-
-// One pass over the included tournaments (not one pass per player) builds
-// a playerId -> [tournaments won] map — computeTournamentResults isn't
-// cached, so calling it once per tournament instead of once per player per
-// tournament keeps this cheap even with a full active roster.
-function getTitleTournamentsMap(includedTournaments){
-  const map = new Map();
-  includedTournaments.forEach(t => {
-    const results = computeTournamentResults(t.id);
-    results.forEach((res, pid) => {
-      if(res.code === "W"){
-        if(!map.has(pid)) map.set(pid, []);
-        map.get(pid).push(t);
-      }
-    });
-  });
-  return map;
-}
-
-function trophyIconHTML(t){
-  const label = t.name + " '" + String(t.year).slice(-2);
-  return '<span class="trophy-icon" title="' + escapeHtml(label) + '">' +
-    '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">' +
-    '<path d="M18 2H6v2H2v3c0 2.76 2.24 5 5 5c.34 1.95 1.83 3.48 3.75 3.9V19H8v2h8v-2h-2.75v-3.1c1.92-.42 3.41-1.95 3.75-3.9c2.76 0 5-2.24 5-5V4h-4V2zM4 7V6h2v3.83C4.84 9.41 4 8.32 4 7zm16 0c0 1.32-.84 2.41-2 2.83V6h2v1z"></path>' +
-    '</svg></span>';
-}
-
 function renderRankings(){
   populateRankingsYearSelect();
   const val = $("#rankings-year").value || "current";
@@ -972,8 +927,6 @@ function renderRankings(){
         ? "Official rankings run a week behind — a tournament only counts once next Monday's rankings publish. Only a player's best " + MAX_COUNTED_RESULTS + " results count, except Grand Slam and WATP 1000 results, which always count if played."
         : "Live — reflects results as soon as they're entered, including tournaments still in progress this week. Only a player's best " + MAX_COUNTED_RESULTS + " results count, except Grand Slam and WATP 1000 results, which always count if played.")
     : "";
-
-  const titleTournamentsMap = getTitleTournamentsMap(getIncludedTournamentsForRankingsView(val, effectiveAsOf));
 
   const rows = state.players
     .filter(p => isRolling ? !isPlayerRetiredAsOf(p, effectiveAsOf) : true)
@@ -1037,7 +990,7 @@ function renderRankings(){
       moveCell +
       '<td><button class="player-link" data-open-player="' + r.p.id + '">' + flagImgHTML(r.p.country) + escapeHtml(r.p.name) + '</button></td>' +
       '<td class="country-chip">' + (r.p.country ? escapeHtml(r.p.country.toUpperCase()) : "—") + '</td>' +
-      '<td class="titles-cell">' + ((titleTournamentsMap.get(r.p.id) || []).map(trophyIconHTML).join("") || "0") + '</td>' +
+      '<td>' + r.stats.titles + '</td>' +
       '<td class="points-cell">' + r.stats.points.toLocaleString() + '</td>' +
       '</tr>' + breakdownRow;
   }).join("");
