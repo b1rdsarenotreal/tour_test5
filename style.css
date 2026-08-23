@@ -880,7 +880,7 @@ form textarea{
 }
 .bracket-round{
   position: relative;
-  width: 315px;
+  width: 280px;
   flex-shrink: 0;
 }
 .bracket-round-title{
@@ -999,6 +999,40 @@ form textarea{
   border-radius: 2px;
   margin-right: 4px;
   flex-shrink: 0;
+}
+.ll-badge{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: white;
+  background: #C0392B;
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.slot-withdraw-btn{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease;
+  flex-shrink: 0;
+}
+.bracket-slot:hover .slot-withdraw-btn{opacity: 1;}
+.slot-withdraw-btn:hover{background: #C0392B; color: white; border-color: #C0392B;}
+.ll-pick-rank{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-right: 6px;
 }
 .wc-badge{
   font-family:'JetBrains Mono', monospace;

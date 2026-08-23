@@ -1907,6 +1907,7 @@ function ensureBracketEntries(t){
   if(!Array.isArray(t.unseededEntrants)) t.unseededEntrants = [];
   if(!Array.isArray(t.qualifierIds)) t.qualifierIds = [];
   if(!Array.isArray(t.entryList)) t.entryList = [];
+  if(!Array.isArray(t.luckyLoserIds)) t.luckyLoserIds = [];
 }
 
 // Seed number (1-indexed) for a player in this tournament's main draw, or null.
@@ -1917,6 +1918,108 @@ function seedNumberForPlayer(t, playerId){
 function isMainDrawQualifier(t, playerId){
   return (t.qualifierIds || []).includes(playerId);
 }
+function isLuckyLoser(t, playerId){
+  return (t.luckyLoserIds || []).includes(playerId);
+}
+// Real tour rule: a Lucky Loser comes from whoever lost in the LAST round
+// of qualifying — the players who came closest to qualifying outright, so
+// they get first call on any main-draw withdrawal. Excludes anyone already
+// placed somewhere in the main draw and anyone retired.
+function getLuckyLoserCandidates(t){
+  if(!t.qualifying || !t.qualifying.enabled) return [];
+  const finalQualRound = "Q" + t.qualifying.numRounds;
+  const qualMatches = state.matches.filter(m => m.tournamentId === t.id && m.bracket === "qual" && m.round === finalQualRound);
+  const loserIds = new Set();
+  qualMatches.forEach(m => {
+    if(!m.winnerId) return;
+    const loserId = m.playerAId === m.winnerId ? m.playerBId : m.playerAId;
+    if(loserId) loserIds.add(loserId);
+  });
+  const alreadyInMainDraw = new Set((t.bracketEntries || []).filter(e => e.type === "player").map(e => e.playerId));
+  return Array.from(loserIds)
+    .filter(pid => !alreadyInMainDraw.has(pid))
+    .map(pid => playerById(pid))
+    .filter(p => p && !p.retired);
+}
+
+/* ---------------- Lucky Loser picker ---------------- */
+let llWithdrawnContext = null; // {tournamentId, withdrawnPlayerId}
+
+function openLuckyLoserPicker(t, withdrawnPlayerId){
+  llWithdrawnContext = {tournamentId: t.id, withdrawnPlayerId};
+  renderLuckyLoserPicker();
+  $("#ll-modal-backdrop").classList.remove("hidden");
+}
+function closeLuckyLoserPicker(){
+  llWithdrawnContext = null;
+  $("#ll-modal-backdrop").classList.add("hidden");
+}
+function renderLuckyLoserPicker(){
+  if(!llWithdrawnContext) return;
+  const t = tournamentById(llWithdrawnContext.tournamentId);
+  const withdrawnPlayer = playerById(llWithdrawnContext.withdrawnPlayerId);
+  if(!t || !withdrawnPlayer){ closeLuckyLoserPicker(); return; }
+
+  const seedDateEl = $("#bracket-seed-date");
+  const seedDate = seedDateEl ? rankingDateFromSelectValue(seedDateEl.value) : mondayOf(getLatestActiveDate());
+  const ranks = officialRanksAsOf(seedDate);
+  const candidates = getLuckyLoserCandidates(t).sort((a,b) => (ranks[a.id] || 99999) - (ranks[b.id] || 99999));
+
+  const modal = $("#ll-modal");
+  modal.innerHTML = "";
+  modal.appendChild(el("h3", {}, ["Replace " + withdrawnPlayer.name]));
+  modal.appendChild(el("p", {class:"modal-help"}, ["Choose a Lucky Loser to fill the vacated spot — candidates are whoever lost in the last round of qualifying, ranked by the seeding date above the draw."]));
+
+  if(candidates.length === 0){
+    modal.appendChild(el("p", {}, ["No eligible Lucky Losers right now — either no one has lost in the final qualifying round yet, or qualifying isn't enabled for this tournament."]));
+  } else {
+    const list = el("div", {style:"display:flex; flex-direction:column; gap:6px; max-height:340px; overflow-y:auto;"});
+    candidates.forEach(p => {
+      const btn = el("button", {type:"button", class:"picker-option", "data-select-ll": p.id, html:
+        (ranks[p.id] ? '<span class="ll-pick-rank">No. ' + ranks[p.id] + '</span> ' : "") + playerNameHTML(p)
+      });
+      list.appendChild(btn);
+    });
+    modal.appendChild(list);
+  }
+
+  modal.appendChild(el("div", {class:"modal-close-row"}, [
+    el("span", {}),
+    el("button", {class:"btn btn-ghost", id:"ll-modal-close"}, ["Cancel"])
+  ]));
+}
+function handleSelectLuckyLoser(replacementId){
+  if(!llWithdrawnContext) return;
+  const t = tournamentById(llWithdrawnContext.tournamentId);
+  const withdrawnPlayerId = llWithdrawnContext.withdrawnPlayerId;
+  const withdrawnPlayer = playerById(withdrawnPlayerId);
+  const replacementPlayer = playerById(replacementId);
+  if(!t || !replacementPlayer) return;
+  if(!confirm("Replace " + (withdrawnPlayer ? withdrawnPlayer.name : "this player") + " with " + replacementPlayer.name + " as a Lucky Loser?")) return;
+
+  const entryIdx = (t.bracketEntries || []).findIndex(e => e.type === "player" && e.playerId === withdrawnPlayerId);
+  if(entryIdx === -1){ closeLuckyLoserPicker(); return; }
+  t.bracketEntries[entryIdx] = {type:"player", playerId: replacementId};
+
+  // A Lucky Loser is always unseeded, even when replacing a seeded player —
+  // the seed just disappears rather than transferring.
+  const seedIdx = (t.seeds || []).indexOf(withdrawnPlayerId);
+  if(seedIdx >= 0) t.seeds[seedIdx] = null;
+
+  // Bookkeeping for the unseeded-entrants list, so other displays (like the
+  // Entry List) stay consistent with who's actually in the draw now.
+  const unseededIdx = (t.unseededEntrants || []).indexOf(withdrawnPlayerId);
+  if(unseededIdx >= 0) t.unseededEntrants[unseededIdx] = replacementId;
+  else if(!t.unseededEntrants.includes(replacementId)) t.unseededEntrants.push(replacementId);
+
+  if(!Array.isArray(t.luckyLoserIds)) t.luckyLoserIds = [];
+  t.luckyLoserIds.push(replacementId);
+
+  saveState();
+  closeLuckyLoserPicker();
+  renderBracketPage();
+}
+
 // Wild-card status comes from the entry list, independent of where the
 // player actually ended up (seeded or not) — real draws can and do have a
 // seeded wild card, so this always stacks alongside a seed badge rather than
@@ -3776,10 +3879,12 @@ function buildSlotRow(slot, m, which, t){
     const isWC = t ? isMainDrawWildCard(t, slot.playerId) : false;
     const isPR = t ? isMainDrawProtectedRanking(t, slot.playerId) : false;
     const isQ = t ? isMainDrawQualifier(t, slot.playerId) : false;
+    const isLL = t ? isLuckyLoser(t, slot.playerId) : false;
     const badges = (seedNum ? '<span class="seed-badge">' + seedNum + '</span>' : "") +
       (isWC ? '<span class="wc-badge">WC</span>' : "") +
       (isPR ? '<span class="pr-badge">PR</span>' : "") +
-      (isQ ? '<span class="qual-badge">Q</span>' : "");
+      (isQ ? '<span class="qual-badge">Q</span>' : "") +
+      (isLL ? '<span class="ll-badge">LL</span>' : "");
     // Ready matches: clicking a name awards that player the win by walkover.
     // Everything else: clicking a name opens their profile.
     nameHTML = badges + (p ? (m.status === "ready" ? playerNameHTML(p) : playerLinkHTML(p)) : "(removed player)");
@@ -3793,10 +3898,23 @@ function buildSlotRow(slot, m, which, t){
   }
   const isWinner = m.status !== "ready" && m.winnerSlot && slot.type === "player" && m.winnerSlot.playerId === slot.playerId;
   const isWalkoverClickable = m.status === "ready" && slot.type === "player";
+  // Lucky Loser replacement only makes sense in Round 1, before any result
+  // is recorded — once a match is played (or it's a later round), there's
+  // no "withdrawal into an unplayed slot" left to fill.
+  const isFirstRound = t && m.round === bracketRoundNames(capacityOf(t.drawSize))[0];
+  const isWithdrawable = isWalkoverClickable && isFirstRound;
   const row = el("div", {class: "bracket-slot" + (isWinner ? " slot-winner" : "") + extraClass + (isWalkoverClickable ? " slot-walkover-target" : "")});
   row.appendChild(el("span", {class:"slot-name", html: nameHTML}));
   if(m.status === "played" && m.existingMatch && slot.type === "player"){
     row.appendChild(el("span", {html: slotScoreHTML(m.existingMatch, slot.playerId)}));
+  }
+  if(isWithdrawable){
+    const wdBtn = el("button", {type:"button", class:"slot-withdraw-btn", title:"Mark withdrawn — replace with a Lucky Loser"}, ["WD"]);
+    wdBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLuckyLoserPicker(t, slot.playerId);
+    });
+    row.appendChild(wdBtn);
   }
   if(isWalkoverClickable){
     const p = playerById(slot.playerId);
@@ -5006,6 +5124,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("#player-modal-backdrop").addEventListener("click", (e) => { if(e.target.id === "player-modal-backdrop") closePlayerModal(); });
+  $("#ll-modal-backdrop").addEventListener("click", (e) => { if(e.target.id === "ll-modal-backdrop") closeLuckyLoserPicker(); });
+  $("#ll-modal-backdrop").addEventListener("click", (e) => {
+    const closeBtn = e.target.closest("#ll-modal-close");
+    if(closeBtn) closeLuckyLoserPicker();
+    const pickBtn = e.target.closest("[data-select-ll]");
+    if(pickBtn) handleSelectLuckyLoser(pickBtn.dataset.selectLl);
+  });
 
   document.addEventListener("click", (e) => {
     const retireBtn = e.target.closest("[data-toggle-retire]");
