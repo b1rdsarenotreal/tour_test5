@@ -2671,6 +2671,15 @@ function buildRRMatchCard(t, g, slotIdx, pair){
   if(existingMatch) body.appendChild(el("div", {class:"bracket-match-score", html: renderScoreboardHTML(existingMatch)}));
   card.appendChild(body);
 
+  if(!existingMatch && pair[0] && pair[1]){
+    const h2hBtn = el("button", {type:"button", class:"h2h-inline-badge", title:"View head-to-head record"}, ["H2H"]);
+    h2hBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openH2HPopup(pair[0], pair[1]);
+    });
+    card.appendChild(h2hBtn);
+  }
+
   if(existingMatch){
     const clearX = el("button", {type:"button", class:"clear-x", title:"Clear result"}, ["\u00d7"]);
     clearX.addEventListener("click", (e) => {
@@ -2715,6 +2724,15 @@ function buildKnockoutMatchCard(t, round, slot, pidA, pidB){
   body.appendChild(names);
   if(existingMatch) body.appendChild(el("div", {class:"bracket-match-score", html: renderScoreboardHTML(existingMatch)}));
   card.appendChild(body);
+
+  if(!existingMatch && pidA && pidB){
+    const h2hBtn = el("button", {type:"button", class:"h2h-inline-badge", title:"View head-to-head record"}, ["H2H"]);
+    h2hBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openH2HPopup(pidA, pidB);
+    });
+    card.appendChild(h2hBtn);
+  }
 
   if(existingMatch){
     const clearX = el("button", {type:"button", class:"clear-x", title:"Clear result"}, ["\u00d7"]);
@@ -3361,6 +3379,15 @@ function buildQualMatchCard(t, m){
   const card = el("div", {class:"bracket-match status-" + m.status});
   card.appendChild(buildQualSlotRow(t, m.slotA, m));
   card.appendChild(buildQualSlotRow(t, m.slotB, m));
+
+  if(m.status === "ready" && m.slotA.type === "player" && m.slotB.type === "player"){
+    const h2hBtn = el("button", {type:"button", class:"h2h-inline-badge", title:"View head-to-head record"}, ["H2H"]);
+    h2hBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openH2HPopup(m.slotA.playerId, m.slotB.playerId);
+    });
+    card.appendChild(h2hBtn);
+  }
 
   if(m.status === "ready"){
     card.appendChild(buildQualEntryForm(t, m));
