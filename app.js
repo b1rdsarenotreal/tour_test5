@@ -1413,7 +1413,7 @@ function renderPlayerProfile(playerId){
   const totals = computeRankingsAsOf(latest);
   const careerStats = computeRankings(null).get(playerId) || {points:0, titles:0};
   const seasonStats = computeRankings(currentYear).get(playerId) || {points:0, titles:0};
-  const currentRank = ranksFromTotals(totals)[playerId] || null;
+  const currentRank = ranksFromTotals(totals, latest)[playerId] || null;
 
   // surface breakdown (also tour-level only, excludes qualifying) — both career and this season
   const surfaceStats = {hard:{w:0,l:0}, clay:{w:0,l:0}, grass:{w:0,l:0}};
