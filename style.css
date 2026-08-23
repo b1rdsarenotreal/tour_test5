@@ -345,6 +345,22 @@ main.wrap{padding-top: 32px; padding-bottom: 80px;}
   margin-bottom: 8px;
   flex-wrap: wrap;
 }
+.history-log-row{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  padding: 8px 4px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.history-log-row:last-child{border-bottom: none;}
+.history-log-date{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+  width: 90px;
+}
 .surface-tag{
   font-family:'JetBrains Mono', monospace;
   font-size: 10px;

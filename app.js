@@ -1451,11 +1451,15 @@ function renderPlayerProfile(playerId){
 
   const modal = $("#player-modal");
   modal.innerHTML = "";
+  const nameHistory = (p.history || []).filter(h => h.type === "name");
+  const countryHistory = (p.history || []).filter(h => h.type === "country");
+  const formerNames = nameHistory.map(h => h.from);
   modal.appendChild(el("div", {class:"profile-head"}, [
     el("div", {}, [
       el("div", {class:"profile-name", html: playerNameHTML(p)}),
       el("div", {class:"profile-meta"}, [
-        (p.country ? p.country.toUpperCase() : "—") + " · " + (p.hand === "L" ? "Left-handed" : "Right-handed")
+        (p.country ? p.country.toUpperCase() : "—") + " · " + (p.hand === "L" ? "Left-handed" : "Right-handed") +
+        (formerNames.length ? " · formerly " + formerNames.map(escapeHtml).join(", ") : "")
       ])
     ]),
     el("button", {class:"btn btn-small btn-ghost", "data-edit-player": p.id}, ["Edit"])
@@ -1473,6 +1477,20 @@ function renderPlayerProfile(playerId){
         el("div", {class:"bio-value"}, [value])
       ])
     )));
+  }
+
+  if(nameHistory.length || countryHistory.length){
+    modal.appendChild(el("div", {class:"profile-section-title"}, ["Name & Country History"]));
+    const combined = [...nameHistory, ...countryHistory].sort((a,b) => new Date(a.date) - new Date(b.date));
+    combined.forEach(h => {
+      const line = h.type === "name"
+        ? "Name changed from " + escapeHtml(h.from) + " to " + escapeHtml(h.to)
+        : "Country changed from " + (h.from ? flagImgHTML(h.from) + escapeHtml(h.from.toUpperCase()) : "—") + " to " + (h.to ? flagImgHTML(h.to) + escapeHtml(h.to.toUpperCase()) : "—");
+      modal.appendChild(el("div", {class:"history-log-row", html:
+        '<span class="history-log-date">' + formatWeekDate(new Date(h.date).getTime()) + '</span>' +
+        '<span>' + line + '</span>'
+      }));
+    });
   }
 
   const statsBox = el("div", {class:"profile-stats"}, [
@@ -4894,6 +4912,7 @@ function openEditPlayer(id){
   $("#ep-hand").value = p.hand || "R";
   $("#ep-turnedpro").value = p.turnedPro || "";
   $("#ep-height").value = p.height || "";
+  $("#ep-change-date").value = new Date().toISOString().slice(0, 10);
   updateEditFlagPreview();
   $("#edit-player-backdrop").classList.remove("hidden");
 }
@@ -4912,8 +4931,25 @@ function handleEditPlayer(ev){
   if(!p) return;
   const name = $("#ep-name").value.trim();
   if(!name) return;
+  const country = $("#ep-country").value.trim().toUpperCase();
+  const changeDate = $("#ep-change-date").value || new Date().toISOString().slice(0, 10);
+
+  // Log the change BEFORE overwriting, so the history entry captures what
+  // it actually changed FROM. Name and country are logged as separate
+  // entries even if both changed in the same edit, since they're
+  // conceptually different kinds of change (and might not have actually
+  // happened on the same real-world date, even though we only have one
+  // date field to work with here).
+  if(!Array.isArray(p.history)) p.history = [];
+  if(name !== p.name){
+    p.history.push({type:"name", from: p.name, to: name, date: changeDate, createdAt: Date.now()});
+  }
+  if(country !== (p.country || "")){
+    p.history.push({type:"country", from: p.country || "", to: country, date: changeDate, createdAt: Date.now()});
+  }
+
   p.name = name;
-  p.country = $("#ep-country").value.trim().toUpperCase();
+  p.country = country;
   p.hand = $("#ep-hand").value;
   p.turnedPro = $("#ep-turnedpro").value ? Number($("#ep-turnedpro").value) : null;
   p.height = $("#ep-height").value ? Number($("#ep-height").value) : null;
