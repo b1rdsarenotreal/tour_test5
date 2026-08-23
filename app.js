@@ -3955,8 +3955,12 @@ function buildBracketMatchCard(t, m){
   card.appendChild(buildSlotRow(m.slotA, m, "A", t));
   card.appendChild(buildSlotRow(m.slotB, m, "B", t));
 
-  if(m.slotA.type === "player" && m.slotB.type === "player"){
-    const h2hBtn = el("button", {type:"button", class:"h2h-badge", title:"View head-to-head record"}, ["H2H"]);
+  // Same "there until it's decided, then gone" treatment as the WD button —
+  // once a result is recorded there's no more "about to face off" tension
+  // to check, and the full match history (including this one) is always
+  // still one click away from either player's own profile.
+  if(m.status === "ready" && m.slotA.type === "player" && m.slotB.type === "player"){
+    const h2hBtn = el("button", {type:"button", class:"h2h-inline-badge", title:"View head-to-head record"}, ["H2H"]);
     h2hBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       openH2HPopup(m.slotA.playerId, m.slotB.playerId);
