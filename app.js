@@ -872,8 +872,12 @@ function renderBreakdownTableHTML(playerId, asOfMs){
       const roundLabel = e.code === "W" ? "W" : e.code;
       const cls = "breakdown-cell " + resultColorClass(e) + (e.counted ? "" : " not-counted");
       const qTag = e.hadQualifyingBonus ? '<span class="breakdown-qtag" title="Includes a qualifying bonus">+Q</span>' : "";
-      const titleAttr = e.counted ? "Counts toward ranking" : "Didn't count — outside the best " + MAX_COUNTED_RESULTS;
-      bodyCells += '<td class="' + cls + '" title="' + titleAttr + '">' + escapeHtml(roundLabel) + qTag + '<span class="breakdown-pts">' + e.points + '</span></td>';
+      // Unit separator, not a plain "|" — a user-typed tournament name could
+      // theoretically contain a pipe character and silently misalign the
+      // split on the JS side; a control character never will.
+      const tooltipText = e.tournamentName + "\u001F" + (e.code === "W" ? "Champion" : "Lost " + (ROUND_LABELS[e.code] || e.code)) +
+        "\u001F" + e.points + " pts" + "\u001F" + (e.counted ? "Counts toward ranking" : "Didn't count \u2014 outside the best " + MAX_COUNTED_RESULTS);
+      bodyCells += '<td class="' + cls + '" data-breakdown-tip="' + escapeHtml(tooltipText) + '" data-open-bracket="' + e.tournamentId + '">' + escapeHtml(roundLabel) + qTag + '<span class="breakdown-pts">' + e.points + '</span></td>';
     });
   });
 
@@ -985,7 +989,7 @@ function renderRankings(){
     if(isExpanded){
       breakdownRow = '<tr class="breakdown-row"><td colspan="6">' + renderBreakdownTableHTML(r.p.id, effectiveAsOf) + '</td></tr>';
     }
-    return '<tr>' +
+    return '<tr' + (isRolling ? ' class="rank-row-clickable" data-toggle-breakdown="' + r.p.id + '"' : '') + '>' +
       '<td class="rank-col">' + toggleBtn + '<span class="' + rankClass + '">' + rank + '</span></td>' +
       moveCell +
       '<td><button class="player-link" data-open-player="' + r.p.id + '">' + flagImgHTML(r.p.country) + escapeHtml(r.p.name) + '</button></td>' +
@@ -5088,6 +5092,25 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRankings();
   });
 
+  // Same shared tooltip element as the rank-history chart above — the
+  // breakdown table's cells already carry a click-to-open-bracket action
+  // (via data-open-bracket, handled by the existing global click delegation
+  // further down), this just adds a richer hover on top of that.
+  document.addEventListener("mouseover", (e) => {
+    const cell = e.target.closest("[data-breakdown-tip]");
+    if(!cell) return;
+    const tip = chartTooltipEl();
+    const [name, result, points, countedNote] = cell.dataset.breakdownTip.split("\u001F");
+    tip.innerHTML = '<b>' + escapeHtml(name) + '</b><br>' + escapeHtml(result) + ' \u2014 ' + escapeHtml(points) + '<br>' + escapeHtml(countedNote) + '<br><span class="chart-tooltip-hint">Click for bracket</span>';
+    const rect = cell.getBoundingClientRect();
+    tip.style.left = (rect.left + rect.width / 2) + "px";
+    tip.style.top = (rect.top - 8) + "px";
+    tip.classList.remove("hidden");
+  });
+  document.addEventListener("mouseout", (e) => {
+    if(e.target.closest("[data-breakdown-tip]")) chartTooltipEl().classList.add("hidden");
+  });
+
   $("#rankings-search").addEventListener("input", renderRankings);
   $("#rankings-mode-toggle").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-rankings-mode]");
@@ -5136,7 +5159,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const retireBtn = e.target.closest("[data-toggle-retire]");
     if(retireBtn){ handleToggleRetire(retireBtn.dataset.toggleRetire); return; }
     const toggleBtn = e.target.closest("[data-toggle-breakdown]");
-    if(toggleBtn){
+    if(toggleBtn && !e.target.closest(".player-link")){
       const pid = toggleBtn.dataset.toggleBreakdown;
       expandedRankingRow = expandedRankingRow === pid ? null : pid;
       renderRankings();
