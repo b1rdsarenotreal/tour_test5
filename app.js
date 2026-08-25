@@ -1356,7 +1356,21 @@ function computePlayerGrandSlamGrid(playerId){
       // manually-entered result, if one exists (this is the whole point of
       // manual entries: filling in years before this tour tracked results).
       const manual = manualEntries.find(e => e.majorName === name && e.year === years[yi]);
-      if(manual) return {code: manual.code, label: manual.code, cls: gsCellClass(manual.code), manual: true};
+      if(manual){
+        // Same convention real qualifying-only results already use: the
+        // LABEL shows exactly what happened (a qualifying round, or a
+        // simple "A"), but the underlying CODE that feeds titles/appearances
+        // is always "A" — losing in qualifying isn't a main-draw appearance,
+        // and neither is confirming they just didn't play that year. An
+        // actual round-progression code still gets its normal round color.
+        const isQualOrAbsent = manual.code === "A" || manual.code === "Q1" || manual.code === "Q2" || manual.code === "Q3";
+        return {
+          code: isQualOrAbsent ? "A" : manual.code,
+          label: manual.code,
+          cls: isQualOrAbsent ? "gs-cell-a" : gsCellClass(manual.code),
+          manual: true
+        };
+      }
       return {code: null, label: "—", cls: "", manual: false};
     });
 
@@ -1507,7 +1521,7 @@ function renderEditGsGridModal(){
       } else {
         const select = el("select", {"data-gs-year-major": name});
         select.appendChild(el("option", {value:""}, ["\u2014 No entry \u2014"]));
-        ["R128","R64","R32","R16","QF","SF","F","W"].forEach(c => select.appendChild(el("option", {value:c}, [c])));
+        ["A","Q1","Q2","Q3","R128","R64","R32","R16","QF","SF","F","W"].forEach(c => select.appendChild(el("option", {value:c}, [c === "A" ? "A (didn't play)" : c])));
         select.value = existing ? existing.code : "";
         cell.appendChild(select);
       }
