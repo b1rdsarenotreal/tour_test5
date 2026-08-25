@@ -1273,6 +1273,20 @@ form textarea{
 .gs-cell{font-weight: 600; color: var(--ink);}
 .gs-cell-a{background: white; color: var(--ink-soft); font-weight: 400;}
 .gs-cell-manual{box-shadow: inset 0 0 0 2px var(--pink); position: relative;}
+.gs-year-jump-row{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:12px;}
+.gs-year-jump-label{font-family:'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-soft);}
+.gs-year-jump-btn{
+  font-family:'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.gs-year-jump-btn:hover{border-color: var(--ink);}
+.gs-year-jump-btn.active{background: var(--ink); color: var(--paper); border-color: var(--ink);}
+.gs-year-real-note{font-size: 12px; color: var(--ink-soft); font-style: italic;}
 .gs-cell-r{background: #cdeef2;}
 .gs-cell-qf{background: #f5dcb4;}
 .gs-cell-sf{background: #fff176;}

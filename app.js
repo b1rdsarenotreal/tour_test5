@@ -1388,14 +1388,18 @@ function grandSlamGridHTML(playerId){
 /* ---------------- Manual Grand Slam grid entries (pre-tracking years) ---------------- */
 let editGsGridPlayerId = null;
 
+let editGsGridYear = null;
+
 function openEditGsGrid(playerId){
   editGsGridPlayerId = playerId;
+  editGsGridYear = null;
   renderEditGsGridModal();
   $("#edit-gs-grid-backdrop").classList.remove("hidden");
 }
 function closeEditGsGrid(){
   const playerId = editGsGridPlayerId;
   editGsGridPlayerId = null;
+  editGsGridYear = null;
   $("#edit-gs-grid-backdrop").classList.add("hidden");
   // Refresh whatever's behind it so the grid reflects any changes just made.
   if(playerId && !$("#player-modal-backdrop").classList.contains("hidden")){
@@ -1406,79 +1410,107 @@ function renderEditGsGridModal(){
   const p = playerById(editGsGridPlayerId);
   if(!p) return;
   if(!Array.isArray(p.manualSlamResults)) p.manualSlamResults = [];
-
-  if(!$("#gs-entry-major-list")){
-    document.body.appendChild(el("datalist", {id:"gs-entry-major-list"}));
-  }
-  $("#gs-entry-major-list").innerHTML = knownMajorNamesForDatalist().map(n => '<option value="' + escapeHtml(n) + '">').join("");
+  const majorNames = knownMajorNamesForDatalist();
 
   const modal = $("#edit-gs-grid-modal");
   modal.innerHTML = "";
   modal.appendChild(el("h3", {}, ["Grand Slam History \u2014 " + p.name]));
   modal.appendChild(el("p", {class:"modal-help"}, [
-    "Fill in results from before this tour started tracking data \u2014 useful for players who were already active in earlier years. These only ever fill in years where no real tournament is recorded here; an actual tracked result always takes priority over a manual one for the same major and year."
+    "Fill in results from before this tour started tracking data \u2014 useful for players who were already active in earlier years. Pick a year, set a result for whichever majors apply, and save the whole year at once. An actual tracked result always takes priority over a manual one for the same major and year."
   ]));
 
-  const list = el("div", {style:"display:flex; flex-direction:column; gap:6px; margin-bottom:14px;"});
-  if(p.manualSlamResults.length === 0){
-    list.appendChild(el("p", {class:"picker-empty-note"}, ["No manual entries yet."]));
-  } else {
-    p.manualSlamResults.slice()
-      .sort((a,b) => a.year - b.year || a.majorName.localeCompare(b.majorName))
-      .forEach(entry => {
-        const row = el("div", {class:"entry-list-row"});
-        row.appendChild(el("span", {class:"entry-list-name"}, [entry.year + " " + entry.majorName + ": " + entry.code]));
-        row.appendChild(el("button", {type:"button", class:"entry-list-remove", "data-remove-gs-entry": entry.id}, ["\u00d7"]));
-        list.appendChild(row);
-      });
+  // Which years already have at least one manual entry — quick jump back
+  // into any of them without having to remember the number.
+  const yearsWithEntries = Array.from(new Set(p.manualSlamResults.map(e => e.year))).sort((a,b) => b - a);
+  if(yearsWithEntries.length){
+    const jumpRow = el("div", {class:"gs-year-jump-row"});
+    jumpRow.appendChild(el("span", {class:"gs-year-jump-label"}, ["Edited years:"]));
+    yearsWithEntries.forEach(y => {
+      jumpRow.appendChild(el("button", {type:"button", class:"gs-year-jump-btn" + (editGsGridYear === y ? " active" : ""), "data-gs-jump-year": String(y)}, [String(y)]));
+    });
+    modal.appendChild(jumpRow);
   }
-  modal.appendChild(list);
 
-  const addRow = el("div", {class:"field-row", style:"flex-wrap:wrap; align-items:flex-end;"});
-  const majorField = el("label", {style:"flex:2; min-width:160px;"}, ["Major"]);
-  majorField.appendChild(el("input", {type:"text", id:"gs-entry-major", list:"gs-entry-major-list", placeholder:"e.g. Wimbledon"}));
-  const yearField = el("label", {style:"flex:1; min-width:90px;"}, ["Year"]);
-  yearField.appendChild(el("input", {type:"number", id:"gs-entry-year", min:"1877", max:"2100"}));
-  const codeField = el("label", {style:"flex:1; min-width:100px;"}, ["Result"]);
-  const codeSelect = el("select", {id:"gs-entry-code"});
-  ["1R","2R","3R","4R","QF","SF","F","W"].forEach(c => codeSelect.appendChild(el("option", {value:c}, [c])));
-  codeField.appendChild(codeSelect);
-  addRow.appendChild(majorField);
-  addRow.appendChild(yearField);
-  addRow.appendChild(codeField);
-  addRow.appendChild(el("button", {type:"button", class:"btn btn-primary", id:"gs-entry-add"}, ["+ Add"]));
-  modal.appendChild(addRow);
+  const yearRow = el("div", {class:"field-row", style:"align-items:flex-end;"});
+  const yearField = el("label", {style:"flex:1; max-width:140px;"}, ["Year"]);
+  const yearInput = el("input", {type:"number", id:"gs-entry-year", min:"1877", max:"2100"});
+  if(editGsGridYear) yearInput.value = String(editGsGridYear);
+  yearField.appendChild(yearInput);
+  yearRow.appendChild(yearField);
+  yearRow.appendChild(el("button", {type:"button", class:"btn btn-ghost", id:"gs-load-year"}, ["Load Year"]));
+  modal.appendChild(yearRow);
   modal.appendChild(el("span", {class:"form-msg", id:"gs-entry-msg"}, []));
+
+  if(editGsGridYear){
+    const year = editGsGridYear;
+    const table = el("table", {class:"data-table", style:"margin-top:12px;"});
+    table.innerHTML = "<thead><tr><th>Major</th><th>Result</th></tr></thead>";
+    const tbody = el("tbody");
+    table.appendChild(tbody);
+
+    majorNames.forEach(name => {
+      const realTournament = state.tournaments.find(t => t.level === "GRAND_SLAM" && t.name === name && t.year === year);
+      const existing = p.manualSlamResults.find(e => e.majorName === name && e.year === year);
+      const row = el("tr");
+      row.appendChild(el("td", {}, [name]));
+      const cell = el("td");
+      if(realTournament){
+        const realRes = computeTournamentResults(realTournament.id).get(p.id);
+        cell.appendChild(el("span", {class:"gs-year-real-note"}, [
+          "Already tracked here" + (realRes ? " (" + realRes.code + ")" : "") + " \u2014 a manual entry would be ignored"
+        ]));
+      } else {
+        const select = el("select", {"data-gs-year-major": name});
+        select.appendChild(el("option", {value:""}, ["\u2014 No entry \u2014"]));
+        ["1R","2R","3R","4R","QF","SF","F","W"].forEach(c => select.appendChild(el("option", {value:c}, [c])));
+        select.value = existing ? existing.code : "";
+        cell.appendChild(select);
+      }
+      row.appendChild(cell);
+      tbody.appendChild(row);
+    });
+    modal.appendChild(table);
+    modal.appendChild(el("div", {class:"form-actions", style:"margin-top:12px;"}, [
+      el("button", {type:"button", class:"btn btn-primary", id:"gs-save-year"}, ["Save " + year])
+    ]));
+  }
 
   modal.appendChild(el("div", {class:"modal-close-row"}, [
     el("span", {}),
     el("button", {class:"btn btn-ghost", id:"edit-gs-grid-close"}, ["Done"])
   ]));
 }
-function handleAddGsEntry(){
-  const p = playerById(editGsGridPlayerId);
-  if(!p) return;
-  const major = $("#gs-entry-major").value.trim();
+function handleLoadGsYear(){
   const year = Number($("#gs-entry-year").value);
-  const code = $("#gs-entry-code").value;
   const msg = $("#gs-entry-msg");
-  if(!major || !year){
+  if(!year){
     msg.className = "form-msg err";
-    msg.textContent = "Enter both a major name and a year.";
+    msg.textContent = "Enter a year first.";
     return;
   }
+  editGsGridYear = year;
+  renderEditGsGridModal();
+}
+function handleSaveGsYear(){
+  const p = playerById(editGsGridPlayerId);
+  if(!p || !editGsGridYear) return;
+  const year = editGsGridYear;
   if(!Array.isArray(p.manualSlamResults)) p.manualSlamResults = [];
-  const realTournamentExists = state.tournaments.some(t => t.level === "GRAND_SLAM" && t.name === major && t.year === year);
-  // Replace rather than duplicate if an entry for this exact major+year already exists.
-  p.manualSlamResults = p.manualSlamResults.filter(e => !(e.majorName === major && e.year === year));
-  p.manualSlamResults.push({id: uid("gsm"), majorName: major, year, code});
+
+  $all("[data-gs-year-major]").forEach(select => {
+    const major = select.dataset.gsYearMajor;
+    const code = select.value;
+    // Clear whatever was there for this major+year first, then re-add only
+    // if a real code was actually chosen — this way picking "— No entry —"
+    // on something that used to have a value correctly removes it.
+    p.manualSlamResults = p.manualSlamResults.filter(e => !(e.majorName === major && e.year === year));
+    if(code) p.manualSlamResults.push({id: uid("gsm"), majorName: major, year, code});
+  });
+
   saveState();
-  $("#gs-entry-major").value = "";
-  $("#gs-entry-year").value = "";
-  msg.className = "form-msg" + (realTournamentExists ? " err" : " ok");
-  msg.textContent = realTournamentExists
-    ? "Saved — but a real " + major + " " + year + " is already tracked here, so that result will show instead of this manual one."
-    : "Added.";
+  const msg = $("#gs-entry-msg");
+  msg.className = "form-msg ok";
+  msg.textContent = "Saved " + year + ".";
   renderEditGsGridModal();
 }
 function handleRemoveGsEntry(entryId){
@@ -5533,8 +5565,12 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#edit-gs-grid-backdrop").addEventListener("click", (e) => {
     const closeBtn = e.target.closest("#edit-gs-grid-close");
     if(closeBtn){ closeEditGsGrid(); return; }
-    const addBtn = e.target.closest("#gs-entry-add");
-    if(addBtn){ handleAddGsEntry(); return; }
+    const loadBtn = e.target.closest("#gs-load-year");
+    if(loadBtn){ handleLoadGsYear(); return; }
+    const saveBtn = e.target.closest("#gs-save-year");
+    if(saveBtn){ handleSaveGsYear(); return; }
+    const jumpBtn = e.target.closest("[data-gs-jump-year]");
+    if(jumpBtn){ editGsGridYear = Number(jumpBtn.dataset.gsJumpYear); renderEditGsGridModal(); return; }
     const removeBtn = e.target.closest("[data-remove-gs-entry]");
     if(removeBtn){ handleRemoveGsEntry(removeBtn.dataset.removeGsEntry); return; }
   });
