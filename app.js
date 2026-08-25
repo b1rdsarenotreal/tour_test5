@@ -106,6 +106,29 @@ function saveState(){
   }
 }
 
+// One-time migration: the manual Grand Slam entry editor briefly offered
+// "1R"/"2R"/"3R"/"4R" codes instead of this app's actual round convention
+// ("R128"/"R64"/"R32"/"R16"), which would have silently contributed 0-0 to
+// win-loss instead of the correct record. Anyone who saved an entry during
+// that window gets it corrected automatically the next time the app loads,
+// rather than having to notice and re-enter it by hand. Must run after
+// rankingsAsOfCache exists (saveState touches it), so this is called from
+// DOMContentLoaded, not at top-level script scope.
+function migrateLegacyGsRoundCodes(){
+  const legacyMap = {"1R":"R128", "2R":"R64", "3R":"R32", "4R":"R16"};
+  let changed = false;
+  (state.players || []).forEach(p => {
+    if(!Array.isArray(p.manualSlamResults)) return;
+    p.manualSlamResults.forEach(entry => {
+      if(legacyMap[entry.code]){
+        entry.code = legacyMap[entry.code];
+        changed = true;
+      }
+    });
+  });
+  if(changed) saveState();
+}
+
 let state = loadState();
 
 function uid(prefix){
@@ -5369,6 +5392,8 @@ function handleImportFileSelected(e){
 
 /* ---------------- Wire up events ---------------- */
 document.addEventListener("DOMContentLoaded", () => {
+  migrateLegacyGsRoundCodes();
+
   // Only tabs with a real destination switch views directly — the Records
   // dropdown's own toggle button is styled the same but has no data-view
   // (it just opens/closes the menu), so it needs to be excluded here or
