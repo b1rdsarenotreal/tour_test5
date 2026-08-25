@@ -1303,6 +1303,19 @@ function computePlayerGrandSlamGrid(playerId){
     return {w, l};
   }
 
+  // A manual entry only ever carries a "furthest round reached" code, never
+  // real match-by-match data — but a Grand Slam is always a standard
+  // 128-draw, so the round code alone is enough to infer a reasonable
+  // win-loss: reaching the semifinal, for instance, necessarily means
+  // winning every round before it (R128 through QF) and then losing that
+  // one match.
+  function manualRoundWL(code){
+    if(code === "W") return {w: ROUND_ORDER.length, l: 0};
+    const idx = ROUND_ORDER.indexOf(code);
+    if(idx < 0) return {w: 0, l: 0};
+    return {w: idx, l: 1};
+  }
+
   const grid = majorNames.map(name => {
     const editions = years.map(year => slamTournaments.find(tt => tt.name === name && tt.year === year));
     const cells = editions.map((t, yi) => {
@@ -1328,9 +1341,13 @@ function computePlayerGrandSlamGrid(playerId){
     editions.forEach((t, i) => {
       if(cells[i].code === "W") titles++;
       if(cells[i].code && cells[i].code !== "A") appearances++;
-      // Manual entries only carry a "furthest round" code, not real match
-      // data, so they contribute to titles/appearances but not win-loss.
-      if(t){ const r = tourRecordAt(t); w += r.w; l += r.l; }
+      if(t){
+        const r = tourRecordAt(t);
+        w += r.w; l += r.l;
+      } else if(cells[i].manual){
+        const r = manualRoundWL(cells[i].code);
+        w += r.w; l += r.l;
+      }
     });
     return {name, editions, cells, titles, appearances, wins: w, losses: l, winPct: (w + l) > 0 ? Math.round((w / (w + l)) * 100) : 0};
   });
@@ -1339,9 +1356,14 @@ function computePlayerGrandSlamGrid(playerId){
     let w = 0, l = 0;
     grid.forEach(row => {
       const t = row.editions[yi];
-      if(!t) return;
-      const r = tourRecordAt(t);
-      w += r.w; l += r.l;
+      const cell = row.cells[yi];
+      if(t){
+        const r = tourRecordAt(t);
+        w += r.w; l += r.l;
+      } else if(cell.manual){
+        const r = manualRoundWL(cell.code);
+        w += r.w; l += r.l;
+      }
     });
     return {w, l};
   });
@@ -1462,7 +1484,7 @@ function renderEditGsGridModal(){
       } else {
         const select = el("select", {"data-gs-year-major": name});
         select.appendChild(el("option", {value:""}, ["\u2014 No entry \u2014"]));
-        ["1R","2R","3R","4R","QF","SF","F","W"].forEach(c => select.appendChild(el("option", {value:c}, [c])));
+        ["R128","R64","R32","R16","QF","SF","F","W"].forEach(c => select.appendChild(el("option", {value:c}, [c])));
         select.value = existing ? existing.code : "";
         cell.appendChild(select);
       }
