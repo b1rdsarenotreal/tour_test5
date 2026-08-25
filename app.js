@@ -1265,21 +1265,30 @@ function gsCellClass(code){
 // by round reached, with per-major and per-year win-loss summaries.
 function computePlayerGrandSlamGrid(playerId){
   const slamTournaments = state.tournaments.filter(t => t.level === "GRAND_SLAM");
-  if(slamTournaments.length === 0) return null;
+  const p = playerById(playerId);
+  const manualEntries = (p && p.manualSlamResults) || [];
+  if(slamTournaments.length === 0 && manualEntries.length === 0) return null;
 
   // Only show years within this player's own active career span — not
   // every year any Grand Slam has ever existed in the system, which could
-  // stretch back well before this player even joined the tour.
+  // stretch back well before this player even joined the tour. Manually
+  // added pre-tracking years extend this range too, for players who were
+  // already active before this tour started keeping records.
   const playerActiveYears = matchesForPlayer(playerId)
     .map(m => tournamentById(m.tournamentId))
     .filter(Boolean)
     .map(t => t.year);
-  if(playerActiveYears.length === 0) return null;
-  const careerStart = Math.min(...playerActiveYears);
-  const careerEnd = Math.max(...playerActiveYears);
+  const manualYears = manualEntries.map(e => e.year);
+  const allActiveYears = [...playerActiveYears, ...manualYears];
+  if(allActiveYears.length === 0) return null;
+  const careerStart = Math.min(...allActiveYears);
+  const careerEnd = Math.max(...allActiveYears);
 
-  const majorNames = sortMajorNamesByCalendarOrder(Array.from(new Set(slamTournaments.map(t => t.name))));
-  const years = Array.from(new Set(slamTournaments.map(t => t.year)))
+  const majorNames = sortMajorNamesByCalendarOrder(Array.from(new Set([
+    ...slamTournaments.map(t => t.name),
+    ...manualEntries.map(e => e.majorName)
+  ])));
+  const years = Array.from(new Set([...slamTournaments.map(t => t.year), ...manualYears]))
     .filter(y => y >= careerStart && y <= careerEnd)
     .sort((a,b) => a - b);
   if(years.length === 0) return null;
@@ -1296,26 +1305,34 @@ function computePlayerGrandSlamGrid(playerId){
 
   const grid = majorNames.map(name => {
     const editions = years.map(year => slamTournaments.find(tt => tt.name === name && tt.year === year));
-    const cells = editions.map(t => {
-      if(!t) return {code: null, label: "—", cls: ""};
-      const mainRes = computeTournamentResults(t.id).get(playerId);
-      if(mainRes) return {code: mainRes.code, label: mainRes.code, cls: gsCellClass(mainRes.code)};
-      const qRes = (t.qualifying && t.qualifying.enabled) ? computeQualifyingResults(t).get(playerId) : null;
-      if(qRes){
-        const qLabel = qRes.code === "QUALIFIED" ? "Q" : qRes.code;
-        return {code: "A", label: qLabel, cls: "gs-cell-a"};
+    const cells = editions.map((t, yi) => {
+      if(t){
+        const mainRes = computeTournamentResults(t.id).get(playerId);
+        if(mainRes) return {code: mainRes.code, label: mainRes.code, cls: gsCellClass(mainRes.code), manual: false};
+        const qRes = (t.qualifying && t.qualifying.enabled) ? computeQualifyingResults(t).get(playerId) : null;
+        if(qRes){
+          const qLabel = qRes.code === "QUALIFIED" ? "Q" : qRes.code;
+          return {code: "A", label: qLabel, cls: "gs-cell-a", manual: false};
+        }
+        return {code: "A", label: "A", cls: "gs-cell-a", manual: false};
       }
-      return {code: "A", label: "A", cls: "gs-cell-a"};
+      // No real tournament recorded for this major+year — fall back to a
+      // manually-entered result, if one exists (this is the whole point of
+      // manual entries: filling in years before this tour tracked results).
+      const manual = manualEntries.find(e => e.majorName === name && e.year === years[yi]);
+      if(manual) return {code: manual.code, label: manual.code, cls: gsCellClass(manual.code), manual: true};
+      return {code: null, label: "—", cls: "", manual: false};
     });
 
     let titles = 0, appearances = 0, w = 0, l = 0;
     editions.forEach((t, i) => {
       if(cells[i].code === "W") titles++;
       if(cells[i].code && cells[i].code !== "A") appearances++;
+      // Manual entries only carry a "furthest round" code, not real match
+      // data, so they contribute to titles/appearances but not win-loss.
       if(t){ const r = tourRecordAt(t); w += r.w; l += r.l; }
     });
-    const winPct = (w + l) > 0 ? Math.round((w / (w + l)) * 100) : 0;
-    return {name, editions, cells, titles, appearances, wins: w, losses: l, winPct};
+    return {name, editions, cells, titles, appearances, wins: w, losses: l, winPct: (w + l) > 0 ? Math.round((w / (w + l)) * 100) : 0};
   });
 
   const yearTotals = years.map((year, yi) => {
@@ -1349,7 +1366,7 @@ function grandSlamGridHTML(playerId){
   data.grid.forEach(row => {
     html += '<tr><td class="gs-major-name">' + escapeHtml(row.name) + '</td>';
     row.cells.forEach(c => {
-      html += '<td class="gs-cell ' + c.cls + '">' + escapeHtml(c.label) + '</td>';
+      html += '<td class="gs-cell ' + c.cls + (c.manual ? ' gs-cell-manual' : '') + '" title="' + (c.manual ? "Manually added — before this tour tracked results" : "") + '">' + escapeHtml(c.label) + '</td>';
     });
     html += '<td>' + row.titles + ' / ' + row.appearances + '</td>';
     html += '<td>' + row.wins + '&ndash;' + row.losses + '</td>';
@@ -1366,6 +1383,110 @@ function grandSlamGridHTML(playerId){
 
   html += '</tbody></table></div>';
   return html;
+}
+
+/* ---------------- Manual Grand Slam grid entries (pre-tracking years) ---------------- */
+let editGsGridPlayerId = null;
+
+function openEditGsGrid(playerId){
+  editGsGridPlayerId = playerId;
+  renderEditGsGridModal();
+  $("#edit-gs-grid-backdrop").classList.remove("hidden");
+}
+function closeEditGsGrid(){
+  const playerId = editGsGridPlayerId;
+  editGsGridPlayerId = null;
+  $("#edit-gs-grid-backdrop").classList.add("hidden");
+  // Refresh whatever's behind it so the grid reflects any changes just made.
+  if(playerId && !$("#player-modal-backdrop").classList.contains("hidden")){
+    renderPlayerProfile(playerId);
+  }
+}
+function renderEditGsGridModal(){
+  const p = playerById(editGsGridPlayerId);
+  if(!p) return;
+  if(!Array.isArray(p.manualSlamResults)) p.manualSlamResults = [];
+
+  if(!$("#gs-entry-major-list")){
+    document.body.appendChild(el("datalist", {id:"gs-entry-major-list"}));
+  }
+  $("#gs-entry-major-list").innerHTML = knownMajorNamesForDatalist().map(n => '<option value="' + escapeHtml(n) + '">').join("");
+
+  const modal = $("#edit-gs-grid-modal");
+  modal.innerHTML = "";
+  modal.appendChild(el("h3", {}, ["Grand Slam History \u2014 " + p.name]));
+  modal.appendChild(el("p", {class:"modal-help"}, [
+    "Fill in results from before this tour started tracking data \u2014 useful for players who were already active in earlier years. These only ever fill in years where no real tournament is recorded here; an actual tracked result always takes priority over a manual one for the same major and year."
+  ]));
+
+  const list = el("div", {style:"display:flex; flex-direction:column; gap:6px; margin-bottom:14px;"});
+  if(p.manualSlamResults.length === 0){
+    list.appendChild(el("p", {class:"picker-empty-note"}, ["No manual entries yet."]));
+  } else {
+    p.manualSlamResults.slice()
+      .sort((a,b) => a.year - b.year || a.majorName.localeCompare(b.majorName))
+      .forEach(entry => {
+        const row = el("div", {class:"entry-list-row"});
+        row.appendChild(el("span", {class:"entry-list-name"}, [entry.year + " " + entry.majorName + ": " + entry.code]));
+        row.appendChild(el("button", {type:"button", class:"entry-list-remove", "data-remove-gs-entry": entry.id}, ["\u00d7"]));
+        list.appendChild(row);
+      });
+  }
+  modal.appendChild(list);
+
+  const addRow = el("div", {class:"field-row", style:"flex-wrap:wrap; align-items:flex-end;"});
+  const majorField = el("label", {style:"flex:2; min-width:160px;"}, ["Major"]);
+  majorField.appendChild(el("input", {type:"text", id:"gs-entry-major", list:"gs-entry-major-list", placeholder:"e.g. Wimbledon"}));
+  const yearField = el("label", {style:"flex:1; min-width:90px;"}, ["Year"]);
+  yearField.appendChild(el("input", {type:"number", id:"gs-entry-year", min:"1877", max:"2100"}));
+  const codeField = el("label", {style:"flex:1; min-width:100px;"}, ["Result"]);
+  const codeSelect = el("select", {id:"gs-entry-code"});
+  ["1R","2R","3R","4R","QF","SF","F","W"].forEach(c => codeSelect.appendChild(el("option", {value:c}, [c])));
+  codeField.appendChild(codeSelect);
+  addRow.appendChild(majorField);
+  addRow.appendChild(yearField);
+  addRow.appendChild(codeField);
+  addRow.appendChild(el("button", {type:"button", class:"btn btn-primary", id:"gs-entry-add"}, ["+ Add"]));
+  modal.appendChild(addRow);
+  modal.appendChild(el("span", {class:"form-msg", id:"gs-entry-msg"}, []));
+
+  modal.appendChild(el("div", {class:"modal-close-row"}, [
+    el("span", {}),
+    el("button", {class:"btn btn-ghost", id:"edit-gs-grid-close"}, ["Done"])
+  ]));
+}
+function handleAddGsEntry(){
+  const p = playerById(editGsGridPlayerId);
+  if(!p) return;
+  const major = $("#gs-entry-major").value.trim();
+  const year = Number($("#gs-entry-year").value);
+  const code = $("#gs-entry-code").value;
+  const msg = $("#gs-entry-msg");
+  if(!major || !year){
+    msg.className = "form-msg err";
+    msg.textContent = "Enter both a major name and a year.";
+    return;
+  }
+  if(!Array.isArray(p.manualSlamResults)) p.manualSlamResults = [];
+  const realTournamentExists = state.tournaments.some(t => t.level === "GRAND_SLAM" && t.name === major && t.year === year);
+  // Replace rather than duplicate if an entry for this exact major+year already exists.
+  p.manualSlamResults = p.manualSlamResults.filter(e => !(e.majorName === major && e.year === year));
+  p.manualSlamResults.push({id: uid("gsm"), majorName: major, year, code});
+  saveState();
+  $("#gs-entry-major").value = "";
+  $("#gs-entry-year").value = "";
+  msg.className = "form-msg" + (realTournamentExists ? " err" : " ok");
+  msg.textContent = realTournamentExists
+    ? "Saved — but a real " + major + " " + year + " is already tracked here, so that result will show instead of this manual one."
+    : "Added.";
+  renderEditGsGridModal();
+}
+function handleRemoveGsEntry(entryId){
+  const p = playerById(editGsGridPlayerId);
+  if(!p) return;
+  p.manualSlamResults = (p.manualSlamResults || []).filter(e => e.id !== entryId);
+  saveState();
+  renderEditGsGridModal();
 }
 
 // Best (lowest-numbered) rank a player has ever held, across every recorded
@@ -1509,9 +1630,14 @@ function renderPlayerProfile(playerId){
   modal.appendChild(surfaceRow);
 
   const gsGrid = grandSlamGridHTML(playerId);
+  const gsHeader = el("div", {class:"profile-section-title", style:"display:flex; justify-content:space-between; align-items:center;"});
+  gsHeader.appendChild(document.createTextNode("Grand Slam History"));
+  gsHeader.appendChild(el("button", {class:"btn btn-small btn-ghost", "data-edit-gs-grid": playerId}, ["Edit"]));
+  modal.appendChild(gsHeader);
   if(gsGrid){
-    modal.appendChild(el("div", {class:"profile-section-title"}, ["Grand Slam History"]));
     modal.appendChild(el("div", {html: gsGrid}));
+  } else {
+    modal.appendChild(el("p", {}, ["No Grand Slam results yet — use Edit to add results from before this tour tracked data."]));
   }
 
   const tourneyYears = Array.from(new Set(tResults.map(r => r.t.year))).sort((a,b) => b - a);
@@ -5403,6 +5529,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if(pickBtn) handleSelectLuckyLoser(pickBtn.dataset.selectLl);
   });
 
+  $("#edit-gs-grid-backdrop").addEventListener("click", (e) => { if(e.target.id === "edit-gs-grid-backdrop") closeEditGsGrid(); });
+  $("#edit-gs-grid-backdrop").addEventListener("click", (e) => {
+    const closeBtn = e.target.closest("#edit-gs-grid-close");
+    if(closeBtn){ closeEditGsGrid(); return; }
+    const addBtn = e.target.closest("#gs-entry-add");
+    if(addBtn){ handleAddGsEntry(); return; }
+    const removeBtn = e.target.closest("[data-remove-gs-entry]");
+    if(removeBtn){ handleRemoveGsEntry(removeBtn.dataset.removeGsEntry); return; }
+  });
+
   document.addEventListener("click", (e) => {
     const retireBtn = e.target.closest("[data-toggle-retire]");
     if(retireBtn){ handleToggleRetire(retireBtn.dataset.toggleRetire); return; }
@@ -5415,6 +5551,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const editBtn = e.target.closest("[data-edit-player]");
     if(editBtn){ openEditPlayer(editBtn.dataset.editPlayer); return; }
+    const editGsBtn = e.target.closest("[data-edit-gs-grid]");
+    if(editGsBtn){ openEditGsGrid(editGsBtn.dataset.editGsGrid); return; }
     const openBtn = e.target.closest("[data-open-player]");
     if(openBtn){ renderPlayerProfile(openBtn.dataset.openPlayer); return; }
     const sortTh = e.target.closest("[data-sort-col]");

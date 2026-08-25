@@ -1272,6 +1272,7 @@ form textarea{
 }
 .gs-cell{font-weight: 600; color: var(--ink);}
 .gs-cell-a{background: white; color: var(--ink-soft); font-weight: 400;}
+.gs-cell-manual{box-shadow: inset 0 0 0 2px var(--pink); position: relative;}
 .gs-cell-r{background: #cdeef2;}
 .gs-cell-qf{background: #f5dcb4;}
 .gs-cell-sf{background: #fff176;}
