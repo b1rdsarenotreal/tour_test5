@@ -1140,10 +1140,11 @@ function renderRetiredPlayers(){
   }
   section.classList.remove("hidden");
   const careerTotals = computeRankings(null);
+  const peakRanks = computeAllPlayersPeakRanks();
   const sorted = retired.slice().sort((a,b) => a.name.localeCompare(b.name));
   grid.innerHTML = "";
   sorted.forEach(p => {
-    const peak = computePlayerPeakRank(p.id);
+    const peak = peakRanks.get(p.id) || null;
     const titles = (careerTotals.get(p.id) || {titles:0}).titles;
     const card = el("div", {class:"player-card retired-card", "data-open-player": p.id}, [
       el("div", {class:"pc-name", html: playerNameHTML(p)}),
@@ -1597,7 +1598,7 @@ function handleRemoveGsEntry(entryId){
 }
 
 // Best (lowest-numbered) rank a player has ever held, across every recorded
-// tour week — used on the profile and the retired-players list.
+// tour week — used on the profile (a single lookup, so this is fine there).
 function computePlayerPeakRank(playerId){
   let peak = null;
   getRankingSnapshotDates().forEach(d => {
@@ -1606,6 +1607,27 @@ function computePlayerPeakRank(playerId){
     if(r && (peak === null || r < peak)) peak = r;
   });
   return peak;
+}
+
+// Same peak-rank logic, but for EVERY player in one pass — walks each
+// snapshot date only once and updates everyone's running peak from that
+// single ranking snapshot, instead of recomputing (and re-sorting the full
+// player list for) every date once per player. The retired-players list
+// calls this once for the whole grid rather than calling
+// computePlayerPeakRank in a loop, which used to mean redoing that full
+// sort dozens of times per retired player, for every date, on every single
+// render — and got slower the more retired players there were.
+function computeAllPlayersPeakRanks(){
+  const peaks = new Map();
+  getRankingSnapshotDates().forEach(d => {
+    const rankMap = officialRanksAsOf(d);
+    Object.keys(rankMap).forEach(pid => {
+      const r = rankMap[pid];
+      const current = peaks.get(pid);
+      if(current === undefined || r < current) peaks.set(pid, r);
+    });
+  });
+  return peaks;
 }
 
 let profileYearFilterPlayerId = null;
