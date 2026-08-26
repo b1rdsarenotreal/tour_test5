@@ -6,18 +6,34 @@ const STORAGE_KEY = "fortnight-wta-state-v1";
 const ROUND_ORDER = ["R128","R64","R32","R16","QF","SF","F"];
 const ROUND_LABELS = {R128:"R128", R64:"R64", R32:"R32", R16:"R16", QF:"QF", SF:"SF", F:"F", Q1:"Q1", Q2:"Q2", Q3:"Q3"};
 const FRIENDLY_ROUND_NAMES = {R128:"Round of 128", R64:"Round of 64", R32:"Round of 32", R16:"Round of 16", QF:"Quarterfinals", SF:"Semifinals", F:"Final"};
-const LEVEL_LABELS = {GRAND_SLAM:"Grand Slam", WTA1000:"WATP 1000", WTA500:"WATP 500", WTA250:"WATP 250", FINALS:"WATP Finals"};
-const LEVEL_TAG_CLASSES = {GRAND_SLAM:"level-grandslam", FINALS:"level-finals", WTA1000:"level-1000", WTA500:"level-500", WTA250:"level-250"};
+const LEVEL_LABELS = {GRAND_SLAM:"Grand Slam", WTA1000:"WATP 1000", WTA500:"WATP 500", WTA250:"WATP 250", CHALLENGER125:"WATP Challenger 125", CHALLENGER100:"WATP Challenger 100", FINALS:"WATP Finals"};
+const LEVEL_TAG_CLASSES = {GRAND_SLAM:"level-grandslam", FINALS:"level-finals", WTA1000:"level-1000", WTA500:"level-500", WTA250:"level-250", CHALLENGER125:"level-challenger", CHALLENGER100:"level-challenger"};
 const POINTS_TABLE = {
-  GRAND_SLAM: {R128:10, R64:45,  R32:90, R16:180, QF:360, SF:720, F:1200, W:2000},
-  WTA1000:    {R128:5,  R64:10,  R32:45,  R16:90, QF:180, SF:360, F:600,  W:1000},
-  WTA500:     {R128:0,  R64:0,   R32:5,   R16:45,  QF:90, SF:180, F:300,  W:500},
-  WTA250:     {R128:0,  R64:0,   R32:1,   R16:20,  QF:45,  SF:90,  F:150,  W:250}
+  GRAND_SLAM:    {R128:10, R64:45,  R32:90, R16:180, QF:360, SF:720, F:1200, W:2000},
+  WTA1000:       {R128:5,  R64:10,  R32:45,  R16:90, QF:180, SF:360, F:600,  W:1000},
+  WTA500:        {R128:0,  R64:0,   R32:5,   R16:45,  QF:90, SF:180, F:300,  W:500},
+  WTA250:        {R128:0,  R64:0,   R32:1,   R16:20,  QF:45,  SF:90,  F:150,  W:250},
+  CHALLENGER125: {R128:0,  R64:0,   R32:0,   R16:10,  QF:25,  SF:45,  F:75,   W:125},
+  CHALLENGER100: {R128:0,  R64:0,   R32:0,   R16:8,   QF:18,  SF:35,  F:60,   W:100}
 };
 // Points for coming through qualifying: 0 for early-round exits, a small
 // consolation for going out in the last qualifying round, and a bonus for
 // qualifying into the main draw outright (on top of whatever they then do there).
-const QUALIFYING_POINTS_BASE = {GRAND_SLAM:25, WTA1000:16, WTA500:8, WTA250:5};
+const QUALIFYING_POINTS_BASE = {GRAND_SLAM:25, WTA1000:16, WTA500:8, WTA250:5, CHALLENGER125:3, CHALLENGER100:2};
+// Challenger-level events aren't part of the WATP Tour proper — they still
+// earn ranking points (just like real Challengers/125s do), but their
+// matches are excluded everywhere a stat is specifically a "tour record"
+// (career/season win-loss, surface splits, win streaks, Top 10 wins) the
+// same way qualifying matches already are. Head-to-head and the plain
+// match-history lists are deliberately left alone — those are meant to be
+// a complete log of every match played, not a tour-level stat.
+const CHALLENGER_LEVELS = new Set(["CHALLENGER125", "CHALLENGER100"]);
+function isTourLevelMatch(m){
+  if((m.bracket || "main") === "qual") return false;
+  const t = tournamentById(m.tournamentId);
+  if(t && CHALLENGER_LEVELS.has(t.level)) return false;
+  return true;
+}
 const QUALIFIER_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 const QUAL_ROUND_OPTIONS = [1, 2, 3];
 
@@ -875,7 +891,7 @@ function renderBreakdownTableHTML(playerId, asOfMs){
   if(entries.length === 0){
     return '<p class="picker-empty-note">No results in this window yet.</p>';
   }
-  const levels = ["GRAND_SLAM", "WTA1000", "WTA500", "WTA250", "FINALS"];
+  const levels = ["GRAND_SLAM", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100", "FINALS"];
   const byLevel = {};
   levels.forEach(l => { byLevel[l] = entries.filter(e => e.level === l); });
 
@@ -1234,7 +1250,7 @@ function finalsHistoryTableHTML(playerId){
 function getTop10WinsForPlayer(playerId){
   const wins = [];
   matchesForPlayer(playerId).forEach(m => {
-    if((m.bracket || "main") === "qual") return;
+    if(!isTourLevelMatch(m)) return;
     if(m.winnerId !== playerId) return;
     const opponentId = m.playerAId === playerId ? m.playerBId : m.playerAId;
     const t = tournamentById(m.tournamentId);
@@ -1258,7 +1274,7 @@ function computeTop10WinsCounts(){
   const counts = new Map();
   state.players.forEach(p => counts.set(p.id, 0));
   state.matches.forEach(m => {
-    if((m.bracket || "main") === "qual") return;
+    if(!isTourLevelMatch(m)) return;
     const winnerId = m.winnerId;
     if(!winnerId || !counts.has(winnerId)) return;
     const opponentId = m.playerAId === winnerId ? m.playerBId : m.playerAId;
@@ -1613,9 +1629,9 @@ function renderPlayerProfile(playerId){
     return (tb ? tournamentDateMs(tb) : 0) - (ta ? tournamentDateMs(ta) : 0) || ROUND_ORDER.indexOf(b.round) - ROUND_ORDER.indexOf(a.round);
   });
   // Career Win-Loss and surface records are "tour level" stats — qualifying
-  // matches are excluded, same as how the real tour reports it. Recent
-  // Matches below still shows everything, qualifying included, for history.
-  const tourMatches = matches.filter(m => (m.bracket || "main") !== "qual");
+  // and Challenger-level matches are excluded, same as how the real tour
+  // reports it. Recent Matches below still shows everything, for history.
+  const tourMatches = matches.filter(isTourLevelMatch);
   const wins = tourMatches.filter(m => m.winnerId === playerId).length;
   const losses = tourMatches.length - wins;
   const latest = getLatestActiveDate();
@@ -3860,7 +3876,9 @@ function handleEntryListClick(e){
 const FIELD_GEN_WEIGHT_BANDS = {
   WTA1000: [{maxRank:30, weight:10}, {maxRank:60, weight:4}, {maxRank:100, weight:1}, {maxRank:Infinity, weight:0.2}],
   WTA500:  [{maxRank:20, weight:3}, {maxRank:60, weight:8}, {maxRank:100, weight:5}, {maxRank:150, weight:2}, {maxRank:Infinity, weight:0.5}],
-  WTA250:  [{maxRank:20, weight:1}, {maxRank:50, weight:3}, {maxRank:100, weight:6}, {maxRank:200, weight:8}, {maxRank:Infinity, weight:3}]
+  WTA250:  [{maxRank:20, weight:1}, {maxRank:50, weight:3}, {maxRank:100, weight:6}, {maxRank:200, weight:8}, {maxRank:Infinity, weight:3}],
+  CHALLENGER125: [{maxRank:40, weight:0.5}, {maxRank:80, weight:2}, {maxRank:150, weight:6}, {maxRank:350, weight:10}, {maxRank:Infinity, weight:4}],
+  CHALLENGER100: [{maxRank:50, weight:0.3}, {maxRank:100, weight:1}, {maxRank:200, weight:5}, {maxRank:400, weight:10}, {maxRank:Infinity, weight:6}]
 };
 function fieldGenWeight(level, rank){
   const bands = FIELD_GEN_WEIGHT_BANDS[level] || FIELD_GEN_WEIGHT_BANDS.WTA250;
@@ -4325,7 +4343,7 @@ function getAllWeeklySeries(){
 function computeLongestWinStreaks(){
   const byPlayer = new Map();
   state.matches.forEach(m => {
-    if((m.bracket || "main") === "qual") return;
+    if(!isTourLevelMatch(m)) return;
     [m.playerAId, m.playerBId].forEach(pid => {
       if(!byPlayer.has(pid)) byPlayer.set(pid, []);
       byPlayer.get(pid).push(m);

@@ -391,6 +391,7 @@ main.wrap{padding-top: 32px; padding-bottom: 80px;}
 .level-1000{background: #E9E9E9;}
 .level-500{background: #D4F1C5;}
 .level-250{background: #FFFFFF; border-color: var(--line);}
+.level-challenger{background: #C9BFE0;}
 .tourney-name{
   font-weight: 600;
   flex: 1;
