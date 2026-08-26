@@ -1163,6 +1163,29 @@ function renderRetiredPlayers(){
 function getFinalResultsForPlayer(playerId){
   const results = [];
   state.tournaments.forEach(t => {
+    // Challenger events aren't tour-level — they get their own dedicated
+    // section on the profile instead of mixing into tour Final Results.
+    if(CHALLENGER_LEVELS.has(t.level)) return;
+    const tRes = computeTournamentResults(t.id).get(playerId);
+    if(!tRes || (tRes.code !== "W" && tRes.code !== "F")) return;
+    const finalMatch = state.matches.find(m =>
+      m.tournamentId === t.id && (m.bracket || "main") === "main" && m.round === "F" &&
+      (m.playerAId === playerId || m.playerBId === playerId)
+    );
+    if(!finalMatch) return;
+    const opponentId = finalMatch.playerAId === playerId ? finalMatch.playerBId : finalMatch.playerAId;
+    results.push({t, isChamp: tRes.code === "W", opponent: playerById(opponentId), match: finalMatch});
+  });
+  results.sort((a,b) => tournamentDateMs(b.t) - tournamentDateMs(a.t));
+  return results;
+}
+
+// Same shape, scoped specifically to Challenger-level finals — shown in
+// their own section on the profile, and only when it's actually non-empty.
+function getChallengerFinalsForPlayer(playerId){
+  const results = [];
+  state.tournaments.forEach(t => {
+    if(!CHALLENGER_LEVELS.has(t.level)) return;
     const tRes = computeTournamentResults(t.id).get(playerId);
     if(!tRes || (tRes.code !== "W" && tRes.code !== "F")) return;
     const finalMatch = state.matches.find(m =>
@@ -1845,6 +1868,26 @@ function renderPlayerProfile(playerId){
     modal.appendChild(el("p", {}, ["No finals reached yet."]));
   } else {
     modal.appendChild(el("div", {class:"calendar-scroll", html: finalsTableHTML}));
+  }
+
+  const challengerFinals = getChallengerFinalsForPlayer(playerId);
+  if(challengerFinals.length > 0){
+    modal.appendChild(el("div", {class:"profile-section-title"}, ["Challenger Finals"]));
+    challengerFinals.forEach(({t, isChamp, opponent, match}) => {
+      const bracketBtn = el("button", {class:"btn btn-small btn-ghost", "data-open-bracket": t.id}, ["Bracket"]);
+      const row = el("div", {class:"tourney-row"}, [
+        el("span", {class:"level-tag " + (LEVEL_TAG_CLASSES[t.level] || "")}, [LEVEL_LABELS[t.level] || t.level]),
+        el("span", {class:"surface-tag surface-" + t.surface}, [t.surface]),
+        el("span", {class:"tourney-name"}, [t.name + " '" + String(t.year).slice(-2)]),
+        el("span", {class:"tourney-champ", html:
+          '<b class="' + (isChamp ? "final-champ" : "final-runnerup") + '">' + (isChamp ? "Champion" : "Runner-up") + '</b>' +
+          ' — ' + (isChamp ? "def. " : "lost to ") + (opponent ? playerLinkHTML(opponent) : "(unknown)")
+        }),
+        el("span", {html: renderScoreboardHTML(match)}),
+        bracketBtn
+      ]);
+      modal.appendChild(row);
+    });
   }
 
   modal.appendChild(el("div", {class:"profile-section-title"}, ["Top 10 Wins"]));
