@@ -8,6 +8,15 @@ const ROUND_LABELS = {R128:"R128", R64:"R64", R32:"R32", R16:"R16", QF:"QF", SF:
 const FRIENDLY_ROUND_NAMES = {R128:"Round of 128", R64:"Round of 64", R32:"Round of 32", R16:"Round of 16", QF:"Quarterfinals", SF:"Semifinals", F:"Final"};
 const LEVEL_LABELS = {GRAND_SLAM:"Grand Slam", WTA1000:"WATP 1000", WTA500:"WATP 500", WTA250:"WATP 250", CHALLENGER125:"WATP Challenger 125", CHALLENGER100:"WATP Challenger 100", FINALS:"WATP Finals"};
 const LEVEL_TAG_CLASSES = {GRAND_SLAM:"level-grandslam", FINALS:"level-finals", WTA1000:"level-1000", WTA500:"level-500", WTA250:"level-250", CHALLENGER125:"level-challenger", CHALLENGER100:"level-challenger"};
+// Highest prestige first — used to order same-week tournaments on the
+// calendar (Grand Slam/Finals at the top, Challengers at the bottom),
+// rather than a plain alphabetical list where a 250 could sit above a Slam
+// just because its name comes first in the alphabet.
+const LEVEL_SORT_ORDER = ["GRAND_SLAM", "FINALS", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100"];
+function levelSortRank(level){
+  const idx = LEVEL_SORT_ORDER.indexOf(level);
+  return idx === -1 ? LEVEL_SORT_ORDER.length : idx;
+}
 const POINTS_TABLE = {
   GRAND_SLAM:    {R128:10, R64:45,  R32:90, R16:180, QF:360, SF:720, F:1200, W:2000},
   WTA1000:       {R128:5,  R64:10,  R32:45,  R16:90, QF:180, SF:360, F:600,  W:1000},
@@ -2163,6 +2172,10 @@ function renderTournaments(){
   weeks.forEach(wk => {
     const items = byWeek.get(wk).sort((a,b) => {
       if(a.kind !== b.kind) return a.kind === "bye" ? 1 : -1;
+      if(a.kind === "tournament" && b.kind === "tournament"){
+        const tierDiff = levelSortRank(a.data.level) - levelSortRank(b.data.level);
+        if(tierDiff !== 0) return tierDiff;
+      }
       const nameA = a.kind === "tournament" ? a.data.name : "";
       const nameB = b.kind === "tournament" ? b.data.name : "";
       return nameA.localeCompare(nameB);
