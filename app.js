@@ -552,9 +552,19 @@ const MANDATORY_LEVELS = new Set(["GRAND_SLAM", "WTA1000"]);
 // call for any given date is a Map lookup instead of a full recomputation.
 // The cache is cleared in saveState() any time the underlying data changes.
 let rankingsAsOfCache = new Map();
-function computeRankingsAsOf(asOfMs){
-  if(rankingsAsOfCache.has(asOfMs)) return rankingsAsOfCache.get(asOfMs);
-  const windowStart = asOfMs - rollingWindowDays(asOfMs) * MS_PER_DAY;
+// Normally the window width (364 or 365 days) is decided purely from
+// asOfMs. But movement arrows compare THIS week against LAST week, and if
+// the two weeks fall on opposite sides of the leap-day-widening transition,
+// each would naturally pick a different window width — creating a rank
+// shift that's really just an artifact of the window changing size, not of
+// any real result entering or leaving. forcedWindowDays lets the movement
+// calculation pin last week to the SAME width as this week, so the only
+// thing that can move a player's rank is an actual result change.
+function computeRankingsAsOf(asOfMs, forcedWindowDays){
+  const windowDays = forcedWindowDays !== undefined ? forcedWindowDays : rollingWindowDays(asOfMs);
+  const cacheKey = asOfMs + ":" + windowDays;
+  if(rankingsAsOfCache.has(cacheKey)) return rankingsAsOfCache.get(cacheKey);
+  const windowStart = asOfMs - windowDays * MS_PER_DAY;
   const totals = new Map();
   const perPlayerResults = new Map(); // playerId -> [{points, mandatory}]
   const finalsBonus = new Map(); // playerId -> flat bonus, added after the 18-cap is applied
@@ -632,7 +642,7 @@ function computeRankingsAsOf(asOfMs){
     entry.points = sumCountedResults(results) + (finalsBonus.get(pid) || 0);
   });
 
-  rankingsAsOfCache.set(asOfMs, totals);
+  rankingsAsOfCache.set(cacheKey, totals);
   return totals;
 }
 
@@ -982,7 +992,12 @@ function renderRankings(){
     effectiveAsOf = rankingsMode === "official" ? nominalAsOf - 7 * MS_PER_DAY : nominalAsOf;
     totals = computeRankingsAsOf(effectiveAsOf);
     const prevAsOf = effectiveAsOf - 7 * MS_PER_DAY;
-    const prevTotals = computeRankingsAsOf(prevAsOf);
+    // Pin last week to THIS week's window width (364 or 365 days) rather
+    // than letting it decide its own — otherwise, on the one week a year
+    // the leap-day widening actually kicks in or expires, the two weeks
+    // would be computed with different-sized windows and create a phantom
+    // rank shift, the same class of bug as the retired-players one below.
+    const prevTotals = computeRankingsAsOf(prevAsOf, rollingWindowDays(effectiveAsOf));
     // Both weeks' rank numbering must exclude the same retired players the
     // current week's table excludes — otherwise a retired player sitting
     // above someone in last week's (unfiltered) numbers but absent from
