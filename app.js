@@ -502,6 +502,32 @@ function computeRankings(year){
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function isLeapYear(year){
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+}
+
+// A rolling ranking window is 364 days (52 weeks) — but 364 is always a
+// day or two shorter than a real calendar year, and that gap widens from
+// 1 day to 2 whenever a Feb 29 falls somewhere in the stretch, which is
+// occasionally enough to tip a result into dropping off a whole week
+// earlier than its real one-year mark. Rather than switching the window's
+// definition away from "52 weeks" everywhere, this only widens it to 365
+// days for the specific ~year-long stretch that actually spans a real
+// Feb 29 — checked against the wider 365-day probe on purpose, so a leap
+// day sitting right at the edge of the normal 364-day window is never
+// missed. Every other week keeps the standard, exact 364-day window.
+function rollingWindowDays(asOfMs){
+  const probe = asOfMs - 365 * MS_PER_DAY;
+  const asOfYear = new Date(asOfMs).getFullYear();
+  for(const year of [asOfYear, asOfYear - 1]){
+    if(!isLeapYear(year)) continue;
+    const feb29 = new Date(year, 1, 29).getTime();
+    if(feb29 > probe && feb29 <= asOfMs) return 365;
+  }
+  return 364;
+}
+
 function tournamentDateMs(t){
   if(t.startDate){
     const d = new Date(t.startDate + "T00:00:00");
@@ -528,7 +554,7 @@ const MANDATORY_LEVELS = new Set(["GRAND_SLAM", "WTA1000"]);
 let rankingsAsOfCache = new Map();
 function computeRankingsAsOf(asOfMs){
   if(rankingsAsOfCache.has(asOfMs)) return rankingsAsOfCache.get(asOfMs);
-  const windowStart = asOfMs - 364 * MS_PER_DAY;
+  const windowStart = asOfMs - rollingWindowDays(asOfMs) * MS_PER_DAY;
   const totals = new Map();
   const perPlayerResults = new Map(); // playerId -> [{points, mandatory}]
   const finalsBonus = new Map(); // playerId -> flat bonus, added after the 18-cap is applied
@@ -815,7 +841,7 @@ function populateRankingsYearSelect(){
 // best-18-plus-mandatory rule, kept per-tournament so we can show a real
 // breakdown (not just the final total).
 function computePlayerResultBreakdown(playerId, asOfMs){
-  const windowStart = asOfMs - 364 * MS_PER_DAY;
+  const windowStart = asOfMs - rollingWindowDays(asOfMs) * MS_PER_DAY;
   const entries = [];
   state.tournaments.forEach(t => {
     const d = tournamentDateMs(t);
