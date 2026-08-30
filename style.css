@@ -63,6 +63,12 @@ h1,h2,h3{
   color: white;
 }
 .header-add-player:hover{background: var(--ball-dark); border-color: var(--ball-dark);}
+.header-points-config{
+  flex-shrink: 0;
+  color: var(--paper-3);
+  border-color: var(--paper-3);
+}
+.header-points-config:hover{color: var(--paper); border-color: var(--paper);}
 #global-search-wrap{width: 220px; flex-shrink: 0;}
 #global-search-input{width: 100%;}
 .search-group-label{
@@ -749,6 +755,20 @@ form textarea{
 }
 .modal h3{font-size: 20px; margin-bottom: 18px;}
 #player-modal{max-width: 1400px;}
+.points-config-modal{max-width: 1150px;}
+.points-config-table th, .points-config-table td{white-space: nowrap; padding: 4px 6px;}
+.pc-input{
+  width: 44px;
+  font-family:'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  text-align: center;
+}
+.pc-input-narrow{width: 40px;}
+.pc-draw-cell input{width: 48px;}
+.pc-draw-cell{white-space: nowrap;}
 
 /* Player profile modal contents */
 .profile-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 18px;}

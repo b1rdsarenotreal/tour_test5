@@ -17,18 +17,61 @@ function levelSortRank(level){
   const idx = LEVEL_SORT_ORDER.indexOf(level);
   return idx === -1 ? LEVEL_SORT_ORDER.length : idx;
 }
-const POINTS_TABLE = {
-  GRAND_SLAM:    {R128:10, R64:45,  R32:90, R16:180, QF:360, SF:720, F:1200, W:2000},
-  WTA1000:       {R128:5,  R64:10,  R32:45,  R16:90, QF:180, SF:360, F:600,  W:1000},
-  WTA500:        {R128:0,  R64:0,   R32:5,   R16:45,  QF:90, SF:180, F:300,  W:500},
-  WTA250:        {R128:0,  R64:0,   R32:1,   R16:20,  QF:45,  SF:90,  F:150,  W:250},
-  CHALLENGER125: {R128:0,  R64:0,   R32:0,   R16:10,  QF:25,  SF:45,  F:75,   W:125},
-  CHALLENGER100: {R128:0,  R64:0,   R32:0,   R16:8,   QF:18,  SF:35,  F:60,   W:100}
+// Default seed values for state.pointsConfig — real ATP/WTA point tables
+// (singles rows), covering every draw size the app actually offers.
+// Levels with only one bracket use a single 0-9999 range; levels that
+// genuinely pay out differently by draw size (1000/500/250) get one
+// bracket per real-world draw-size tier. This is only ever used to
+// initialize state.pointsConfig the first time — after that, the editable
+// copy in state is the source of truth, and this constant is never read
+// directly again.
+const DEFAULT_POINTS_CONFIG = {
+  GRAND_SLAM: [
+    {minDraw:0, maxDraw:9999, points:{R128:10, R64:45, R32:90, R16:180, QF:360, SF:720, F:1200, W:2000}, qual:{Q:25, Q2:8, Q1:0}}
+  ],
+  WTA1000: [
+    {minDraw:80, maxDraw:9999, points:{R128:10, R64:25, R32:45, R16:90, QF:180, SF:360, F:600, W:1000}, qual:{Q:25, Q2:8, Q1:0}},
+    {minDraw:0, maxDraw:79, points:{R64:10, R32:45, R16:90, QF:180, SF:360, F:600, W:1000}, qual:{Q:25, Q2:16, Q1:0}}
+  ],
+  WTA500: [
+    {minDraw:40, maxDraw:9999, points:{R64:0, R32:20, R16:45, QF:90, SF:180, F:300, W:500}, qual:{Q:10, Q2:4, Q1:0}},
+    {minDraw:0, maxDraw:39, points:{R32:0, R16:45, QF:90, SF:180, F:300, W:500}, qual:{Q:20, Q2:10, Q1:0}}
+  ],
+  WTA250: [
+    {minDraw:40, maxDraw:9999, points:{R64:0, R32:10, R16:20, QF:45, SF:90, F:150, W:250}, qual:{Q:5, Q2:3, Q1:0}},
+    {minDraw:0, maxDraw:39, points:{R32:0, R16:20, QF:45, SF:90, F:150, W:250}, qual:{Q:12, Q2:6, Q1:0}}
+  ],
+  CHALLENGER125: [
+    {minDraw:0, maxDraw:9999, points:{R128:0, R64:0, R32:0, R16:10, QF:25, SF:45, F:75, W:125}, qual:{Q:3, Q2:0, Q1:0}}
+  ],
+  CHALLENGER100: [
+    {minDraw:0, maxDraw:9999, points:{R128:0, R64:0, R32:0, R16:8, QF:18, SF:35, F:60, W:100}, qual:{Q:2, Q2:0, Q1:0}}
+  ]
 };
-// Points for coming through qualifying: 0 for early-round exits, a small
-// consolation for going out in the last qualifying round, and a bonus for
-// qualifying into the main draw outright (on top of whatever they then do there).
-const QUALIFYING_POINTS_BASE = {GRAND_SLAM:25, WTA1000:16, WTA500:8, WTA250:5, CHALLENGER125:3, CHALLENGER100:2};
+function ensurePointsConfig(){
+  if(!state.pointsConfig) state.pointsConfig = {};
+  Object.keys(DEFAULT_POINTS_CONFIG).forEach(level => {
+    if(!Array.isArray(state.pointsConfig[level]) || state.pointsConfig[level].length === 0){
+      // Deep copy so edits to state never mutate the defaults.
+      state.pointsConfig[level] = JSON.parse(JSON.stringify(DEFAULT_POINTS_CONFIG[level]));
+    }
+  });
+}
+// Finds the bracket whose draw-size range actually contains this
+// tournament's draw size — falls back to the first defined bracket for
+// that level if somehow nothing matches, so a lookup never silently
+// returns nothing just because of an unusual draw size.
+function getPointsBracket(level, drawSize){
+  ensurePointsConfig();
+  const brackets = state.pointsConfig[level];
+  if(!brackets || brackets.length === 0) return null;
+  return brackets.find(b => drawSize >= b.minDraw && drawSize <= b.maxDraw) || brackets[0];
+}
+// Points for coming through qualifying: 0 for early-round exits, a
+// per-round consolation for losing in that specific qualifying round
+// (Q1, Q2 — this app doesn't model a Q3 round), and a bonus for
+// qualifying into the main draw outright (on top of whatever they then do
+// there). Numbers come straight from state.pointsConfig, editable in-app.
 // Challenger-level events aren't part of the WATP Tour proper — they still
 // earn ranking points (just like real Challengers/125s do), but their
 // matches are excluded everywhere a stat is specifically a "tour record"
@@ -197,10 +240,10 @@ function computeTournamentResults(tid){
   return results;
 }
 
-function pointsForResult(level, code){
-  const table = POINTS_TABLE[level];
-  if(!table) return 0;
-  return table[code] || 0;
+function pointsForResult(level, drawSize, code){
+  const bracket = getPointsBracket(level, drawSize);
+  if(!bracket) return 0;
+  return bracket.points[code] || 0;
 }
 
 // --- Qualifying ---
@@ -303,12 +346,14 @@ function computeQualifyingResults(t){
   return results;
 }
 
-function qualifyingPointsForResult(level, code, numRounds){
-  const base = QUALIFYING_POINTS_BASE[level] || 5;
-  if(code === "QUALIFIED") return base;
-  const roundNum = Number(String(code).slice(1));
-  if(roundNum === numRounds) return Math.round(base / 2);
-  return 0;
+function qualifyingPointsForResult(level, drawSize, code){
+  const bracket = getPointsBracket(level, drawSize);
+  if(!bracket || !bracket.qual) return 0;
+  if(code === "QUALIFIED") return bracket.qual.Q || 0;
+  // code is "Q1", "Q2", etc. — a direct lookup. This app doesn't model a Q3
+  // round, so "Q3" simply isn't a key in qual and naturally resolves to 0
+  // rather than needing special-case handling.
+  return bracket.qual[code] || 0;
 }
 
 /* ---------------- WATP Finals (round robin + knockout) ---------------- */
@@ -479,7 +524,7 @@ function computeRankings(year){
     results.forEach((res, pid) => {
       const entry = totals.get(pid);
       if(!entry) return;
-      entry.points += pointsForResult(t.level, res.code); // 0 for FINALS — no entry in POINTS_TABLE
+      entry.points += pointsForResult(t.level, t.drawSize, res.code); // 0 for FINALS — no bracket configured
       if(res.code === "W") entry.titles += 1;
     });
     if(t.level === "FINALS"){
@@ -494,7 +539,7 @@ function computeRankings(year){
       qresults.forEach((res, pid) => {
         const entry = totals.get(pid);
         if(!entry) return;
-        entry.points += qualifyingPointsForResult(t.level, res.code, t.qualifying.numRounds);
+        entry.points += qualifyingPointsForResult(t.level, t.drawSize, res.code);
       });
     }
   });
@@ -620,11 +665,11 @@ function computeRankingsAsOf(asOfMs, forcedWindowDays){
       const qRes = qresults.get(pid);
       let points = 0;
       if(mainRes){
-        points += pointsForResult(t.level, mainRes.code);
+        points += pointsForResult(t.level, t.drawSize, mainRes.code);
         if(mainRes.code === "W") entry.titles += 1;
       }
       if(qRes){
-        points += qualifyingPointsForResult(t.level, qRes.code, t.qualifying.numRounds);
+        points += qualifyingPointsForResult(t.level, t.drawSize, qRes.code);
       }
       // Anyone who actually played the main draw always gets an entry (even
       // worth 0 points, matching prior behavior). Someone who only played
@@ -717,10 +762,28 @@ function formatWeekDate(ms){
 
 // Chronological list of distinct tournament dates with at least one result,
 // used as the "weeks" for a player's ranking-history chart.
+// If a date falls within some OTHER 2-week flagship tournament's second
+// week, it doesn't get its own "new" published ranking in reality — the
+// official list from the flagship's own first week is still current for
+// the whole fortnight. This redirects any such date back to that
+// flagship's own first week, so a smaller event running alongside a
+// Slam's second week doesn't spuriously create an extra selectable
+// "ranking week" that wouldn't actually have existed.
+function canonicalRankingWeek(dateMs){
+  const naturalMonday = mondayOf(dateMs);
+  for(const t of state.tournaments){
+    if(!t.twoWeeks) continue;
+    const flagshipWeek1 = mondayOf(tournamentDateMs(t));
+    const flagshipWeek2 = flagshipWeek1 + 7 * MS_PER_DAY;
+    if(naturalMonday === flagshipWeek2) return flagshipWeek1;
+  }
+  return naturalMonday;
+}
+
 function getRankingSnapshotDates(){
   const dates = new Set();
   state.tournaments.forEach(t => {
-    if(matchesForTournament(t.id).length > 0) dates.add(tournamentDateMs(t));
+    if(matchesForTournament(t.id).length > 0) dates.add(canonicalRankingWeek(tournamentDateMs(t)));
   });
   return Array.from(dates).sort((a,b) => a - b);
 }
@@ -733,10 +796,10 @@ function getRankingSnapshotDates(){
 function getRankingWeeks(){
   const weeks = new Set();
   state.tournaments.forEach(t => {
-    if(matchesForTournament(t.id).length > 0) weeks.add(mondayOf(tournamentDateMs(t)));
+    if(matchesForTournament(t.id).length > 0) weeks.add(canonicalRankingWeek(tournamentDateMs(t)));
   });
-  (state.byeWeeks || []).forEach(bw => weeks.add(mondayOf(byeWeekDateMs(bw))));
-  weeks.add(mondayOf(getLatestActiveDate()));
+  (state.byeWeeks || []).forEach(bw => weeks.add(canonicalRankingWeek(byeWeekDateMs(bw))));
+  weeks.add(canonicalRankingWeek(getLatestActiveDate()));
   return Array.from(weeks).sort((a,b) => b - a);
 }
 
@@ -883,11 +946,11 @@ function computePlayerResultBreakdown(playerId, asOfMs){
 
     let points = 0, code, label, isQualifying = false;
     if(mainRes){
-      points += pointsForResult(t.level, mainRes.code);
+      points += pointsForResult(t.level, t.drawSize, mainRes.code);
       code = mainRes.code; label = mainRes.label;
     }
     if(qRes){
-      points += qualifyingPointsForResult(t.level, qRes.code, t.qualifying.numRounds);
+      points += qualifyingPointsForResult(t.level, t.drawSize, qRes.code);
       if(!mainRes){ code = qRes.code; label = qRes.label; isQualifying = true; }
     }
     // A qualifying-only entry worth nothing shouldn't waste a slot — same rule as the ranking calc.
@@ -1668,6 +1731,133 @@ function handleRemoveGsEntry(entryId){
   p.manualSlamResults = (p.manualSlamResults || []).filter(e => e.id !== entryId);
   saveState();
   renderEditGsGridModal();
+}
+
+/* ---------------- Points system editor ---------------- */
+const POINTS_CONFIG_ROUND_KEYS = ["W","F","SF","QF","R16","R32","R64","R128"];
+const POINTS_CONFIG_QUAL_KEYS = ["Q","Q2","Q1"];
+
+function openPointsConfigEditor(){
+  ensurePointsConfig();
+  renderPointsConfigEditor();
+  $("#points-config-backdrop").classList.remove("hidden");
+}
+function closePointsConfigEditor(){
+  $("#points-config-backdrop").classList.add("hidden");
+}
+function renderPointsConfigEditor(){
+  ensurePointsConfig();
+  const modal = $("#points-config-modal");
+  modal.innerHTML = "";
+  modal.appendChild(el("h3", {}, ["Points System"]));
+  modal.appendChild(el("p", {class:"modal-help"}, [
+    "How many ranking points each round is worth, by level and draw size. Leave the max draw blank for \"and up.\" Adding or removing a bracket takes effect immediately; number edits need Save Changes below. Nothing recalculates retroactively — past results keep whatever they earned at the time."
+  ]));
+
+  const wrap = el("div", {class:"calendar-scroll"});
+  let html = '<table class="data-table points-config-table"><thead><tr>' +
+    '<th>Level</th><th>Draw size</th>' +
+    POINTS_CONFIG_ROUND_KEYS.map(k => '<th>' + k + '</th>').join("") +
+    POINTS_CONFIG_QUAL_KEYS.map(k => '<th>' + k + '</th>').join("") +
+    '<th></th></tr></thead><tbody>';
+
+  Object.keys(LEVEL_LABELS).forEach(level => {
+    if(level === "FINALS") return; // Finals uses its own round-robin bonus system, not this table
+    const brackets = state.pointsConfig[level] || [];
+    brackets.forEach((b, idx) => {
+      html += '<tr data-pc-level="' + level + '" data-pc-idx="' + idx + '">';
+      html += '<td>' + (idx === 0 ? escapeHtml(LEVEL_LABELS[level]) : '') + '</td>';
+      html += '<td class="pc-draw-cell">' +
+        '<input type="number" class="pc-input" data-pc-field="minDraw" value="' + b.minDraw + '" min="0">' +
+        ' \u2013 ' +
+        '<input type="number" class="pc-input" data-pc-field="maxDraw" value="' + (b.maxDraw >= 9999 ? '' : b.maxDraw) + '" placeholder="max" min="0">' +
+        '</td>';
+      POINTS_CONFIG_ROUND_KEYS.forEach(k => {
+        html += '<td><input type="number" class="pc-input pc-input-narrow" data-pc-field="points.' + k + '" value="' + (b.points[k] !== undefined ? b.points[k] : "") + '" min="0"></td>';
+      });
+      POINTS_CONFIG_QUAL_KEYS.forEach(k => {
+        html += '<td><input type="number" class="pc-input pc-input-narrow" data-pc-field="qual.' + k + '" value="' + (b.qual && b.qual[k] !== undefined ? b.qual[k] : "") + '" min="0"></td>';
+      });
+      html += '<td>' + (brackets.length > 1 ? '<button type="button" class="btn btn-small btn-ghost" data-pc-remove-bracket="' + level + ':' + idx + '">\u00d7</button>' : '') + '</td>';
+      html += '</tr>';
+    });
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  modal.appendChild(wrap);
+
+  const addRow = el("div", {class:"field-row", style:"margin-top:12px; align-items:flex-end;"});
+  const addField = el("label", {}, ["Add a bracket to"]);
+  const addSelect = el("select", {id:"pc-add-level"});
+  Object.keys(LEVEL_LABELS).forEach(level => {
+    if(level === "FINALS") return;
+    addSelect.appendChild(el("option", {value:level}, [LEVEL_LABELS[level]]));
+  });
+  addField.appendChild(addSelect);
+  addRow.appendChild(addField);
+  addRow.appendChild(el("button", {type:"button", class:"btn btn-ghost", id:"pc-add-bracket"}, ["+ Add Draw-Size Bracket"]));
+  modal.appendChild(addRow);
+  modal.appendChild(el("span", {class:"form-msg", id:"pc-msg"}, []));
+
+  modal.appendChild(el("div", {class:"modal-close-row"}, [
+    el("button", {type:"button", class:"btn btn-ghost", id:"pc-reset-defaults"}, ["Reset to Defaults"]),
+    el("div", {style:"display:flex; gap:8px;"}, [
+      el("button", {type:"button", class:"btn btn-ghost", id:"points-config-close"}, ["Close"]),
+      el("button", {type:"button", class:"btn btn-primary", id:"pc-save"}, ["Save Changes"])
+    ])
+  ]));
+}
+function handleAddPointsBracket(){
+  const level = $("#pc-add-level").value;
+  if(!state.pointsConfig[level]) state.pointsConfig[level] = [];
+  state.pointsConfig[level].push({
+    minDraw: 0, maxDraw: 9999,
+    points: {W:0, F:0, SF:0, QF:0, R16:0, R32:0, R64:0, R128:0},
+    qual: {Q:0, Q2:0, Q1:0}
+  });
+  renderPointsConfigEditor();
+}
+function handleRemovePointsBracket(level, idx){
+  if(!state.pointsConfig[level] || state.pointsConfig[level].length <= 1) return;
+  state.pointsConfig[level].splice(idx, 1);
+  renderPointsConfigEditor();
+}
+function handleSavePointsConfig(){
+  const newConfig = {};
+  $all("#points-config-modal tr[data-pc-level]").forEach(row => {
+    const level = row.dataset.pcLevel;
+    if(!newConfig[level]) newConfig[level] = [];
+    const bracket = {points:{}, qual:{}};
+    row.querySelectorAll(".pc-input").forEach(input => {
+      const field = input.dataset.pcField;
+      if(field === "minDraw"){
+        bracket.minDraw = input.value === "" ? 0 : Number(input.value);
+      } else if(field === "maxDraw"){
+        bracket.maxDraw = input.value === "" ? 9999 : Number(input.value);
+      } else if(field.indexOf("points.") === 0){
+        bracket.points[field.slice(7)] = input.value === "" ? 0 : Number(input.value);
+      } else if(field.indexOf("qual.") === 0){
+        bracket.qual[field.slice(5)] = input.value === "" ? 0 : Number(input.value);
+      }
+    });
+    newConfig[level].push(bracket);
+  });
+  // Largest draw-size threshold first, so a tournament's actual draw size
+  // matches the most specific (highest) bracket it qualifies for.
+  Object.keys(newConfig).forEach(level => newConfig[level].sort((a,b) => b.minDraw - a.minDraw));
+  state.pointsConfig = newConfig;
+  saveState();
+  renderRankings();
+  const msg = $("#pc-msg");
+  msg.className = "form-msg ok";
+  msg.textContent = "Saved.";
+}
+function handleResetPointsConfigDefaults(){
+  if(!confirm("Reset every level's points back to the built-in defaults? This discards any custom values you've entered.")) return;
+  state.pointsConfig = JSON.parse(JSON.stringify(DEFAULT_POINTS_CONFIG));
+  saveState();
+  renderPointsConfigEditor();
+  renderRankings();
 }
 
 // Best (lowest-numbered) rank a player has ever held, across every recorded
@@ -5379,6 +5569,7 @@ function handleAddTournament(ev){
   if(level === "FINALS"){
     state.tournaments.push({
       id: uid("t"), name, location, level, surface, year, startDate, drawSize: 8,
+      twoWeeks: $("#at-twoweeks").checked,
       bracketEntries: [], seeds: [], unseededEntrants: [],
       qualifying: {enabled:false, numQualifiers:8, numRounds:2, entrants:[], bracketEntries:[]},
       groups: [{id:"A", name:"Group A", playerIds:[]}, {id:"B", name:"Group B", playerIds:[]}],
@@ -5396,6 +5587,7 @@ function handleAddTournament(ev){
   const qualRounds = Number($("#at-qual-numrounds").value) || 2;
   state.tournaments.push({
     id: uid("t"), name, location, level, surface, year, startDate, drawSize,
+    twoWeeks: $("#at-twoweeks").checked,
     bracketEntries: new Array(capacityOf(drawSize)).fill(0).map(() => ({type:"empty"})),
     seeds: new Array(numSeedsFor(drawSize)).fill(null),
     unseededEntrants: [],
@@ -5422,6 +5614,7 @@ function openEditTournament(id){
   $("#et-level").value = t.level;
   $("#et-surface").value = t.surface;
   $("#et-date").value = t.startDate || "";
+  $("#et-twoweeks").checked = !!t.twoWeeks;
   $("#edit-tournament-backdrop").classList.remove("hidden");
 }
 function closeEditTournament(){
@@ -5441,6 +5634,7 @@ function handleEditTournament(ev){
   t.surface = $("#et-surface").value;
   t.startDate = startDate;
   t.year = new Date(startDate + "T00:00:00").getFullYear();
+  t.twoWeeks = $("#et-twoweeks").checked;
   saveState();
   closeEditTournament();
   renderTournaments();
@@ -5771,6 +5965,25 @@ document.addEventListener("DOMContentLoaded", () => {
     if(jumpBtn){ editGsGridYear = Number(jumpBtn.dataset.gsJumpYear); renderEditGsGridModal(); return; }
     const removeBtn = e.target.closest("[data-remove-gs-entry]");
     if(removeBtn){ handleRemoveGsEntry(removeBtn.dataset.removeGsEntry); return; }
+  });
+
+  $("#open-points-config").addEventListener("click", openPointsConfigEditor);
+  $("#points-config-backdrop").addEventListener("click", (e) => { if(e.target.id === "points-config-backdrop") closePointsConfigEditor(); });
+  $("#points-config-backdrop").addEventListener("click", (e) => {
+    const closeBtn = e.target.closest("#points-config-close");
+    if(closeBtn){ closePointsConfigEditor(); return; }
+    const addBtn = e.target.closest("#pc-add-bracket");
+    if(addBtn){ handleAddPointsBracket(); return; }
+    const saveBtn = e.target.closest("#pc-save");
+    if(saveBtn){ handleSavePointsConfig(); return; }
+    const resetBtn = e.target.closest("#pc-reset-defaults");
+    if(resetBtn){ handleResetPointsConfigDefaults(); return; }
+    const removeBracketBtn = e.target.closest("[data-pc-remove-bracket]");
+    if(removeBracketBtn){
+      const [level, idx] = removeBracketBtn.dataset.pcRemoveBracket.split(":");
+      handleRemovePointsBracket(level, Number(idx));
+      return;
+    }
   });
 
   document.addEventListener("click", (e) => {

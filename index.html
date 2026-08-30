@@ -39,6 +39,7 @@
       <input type="text" class="picker-input" id="global-search-input" placeholder="Search players &amp; tournaments…" autocomplete="off">
       <div class="picker-suggestions hidden" id="global-search-suggestions"></div>
     </div>
+    <button class="btn btn-ghost header-points-config" id="open-points-config" title="Edit the points system">&#9881; Points</button>
     <button class="btn btn-primary header-add-player" id="header-add-player">+ Add Player</button>
   </div>
   <div class="brand-bar"></div>
@@ -423,6 +424,11 @@
   <div class="modal" id="edit-gs-grid-modal"></div>
 </div>
 
+<!-- Points system editor -->
+<div class="modal-backdrop hidden" id="points-config-backdrop">
+  <div class="modal points-config-modal" id="points-config-modal"></div>
+</div>
+
 <!-- Add player modal -->
 <div class="modal-backdrop hidden" id="add-player-backdrop">
   <div class="modal">
@@ -530,6 +536,10 @@
       </div>
       <label>Start date
         <input type="date" id="et-date" required>
+      </label>
+      <label class="walkover-check">
+        <input type="checkbox" id="et-twoweeks">
+        Runs 2 weeks (no new rankings publish mid-event — flagship Slams/1000s)
       </label>
       <p class="modal-help">Draw size and qualifying settings are edited from the tournament's Bracket page.</p>
       <div class="form-actions">
@@ -646,6 +656,10 @@
       </div>
       <label>Start date
         <input type="date" id="at-date" required>
+      </label>
+      <label class="walkover-check">
+        <input type="checkbox" id="at-twoweeks">
+        Runs 2 weeks (no new rankings publish mid-event — flagship Slams/1000s)
       </label>
       <p class="modal-help hidden" id="at-finals-note">WATP Finals is a fixed 8-player, 2-group round robin plus a 4-player knockout — draw size and qualifying don't apply. You'll assign the two groups from the tournament's own page.</p>
       <div id="at-normal-fields">
