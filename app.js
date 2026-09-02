@@ -4,15 +4,15 @@
 /* ---------------- Constants ---------------- */
 const STORAGE_KEY = "fortnight-wta-state-v1";
 const ROUND_ORDER = ["R128","R64","R32","R16","QF","SF","F"];
-const ROUND_LABELS = {R128:"R128", R64:"R64", R32:"R32", R16:"R16", QF:"QF", SF:"SF", F:"F", Q1:"Q1", Q2:"Q2", Q3:"Q3"};
+const ROUND_LABELS = {R128:"R128", R64:"R64", R32:"R32", R16:"R16", QF:"QF", SF:"SF", F:"F", Q1:"Q1", Q2:"Q2", Q3:"Q3", BRONZE:"Bronze"};
 const FRIENDLY_ROUND_NAMES = {R128:"Round of 128", R64:"Round of 64", R32:"Round of 32", R16:"Round of 16", QF:"Quarterfinals", SF:"Semifinals", F:"Final"};
-const LEVEL_LABELS = {GRAND_SLAM:"Grand Slam", WTA1000:"WATP 1000", WTA500:"WATP 500", WTA250:"WATP 250", CHALLENGER125:"WATP Challenger 125", CHALLENGER100:"WATP Challenger 100", FINALS:"WATP Finals"};
-const LEVEL_TAG_CLASSES = {GRAND_SLAM:"level-grandslam", FINALS:"level-finals", WTA1000:"level-1000", WTA500:"level-500", WTA250:"level-250", CHALLENGER125:"level-challenger", CHALLENGER100:"level-challenger"};
+const LEVEL_LABELS = {GRAND_SLAM:"Grand Slam", WTA1000:"WATP 1000", WTA500:"WATP 500", WTA250:"WATP 250", CHALLENGER125:"WATP Challenger 125", CHALLENGER100:"WATP Challenger 100", OLYMPICS:"Summer Olympics", FINALS:"WATP Finals"};
+const LEVEL_TAG_CLASSES = {GRAND_SLAM:"level-grandslam", FINALS:"level-finals", WTA1000:"level-1000", WTA500:"level-500", WTA250:"level-250", CHALLENGER125:"level-challenger", CHALLENGER100:"level-challenger", OLYMPICS:"level-olympics"};
 // Highest prestige first — used to order same-week tournaments on the
 // calendar (Grand Slam/Finals at the top, Challengers at the bottom),
 // rather than a plain alphabetical list where a 250 could sit above a Slam
 // just because its name comes first in the alphabet.
-const LEVEL_SORT_ORDER = ["GRAND_SLAM", "FINALS", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100"];
+const LEVEL_SORT_ORDER = ["GRAND_SLAM", "FINALS", "OLYMPICS", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100"];
 function levelSortRank(level){
   const idx = LEVEL_SORT_ORDER.indexOf(level);
   return idx === -1 ? LEVEL_SORT_ORDER.length : idx;
@@ -46,6 +46,14 @@ const DEFAULT_POINTS_CONFIG = {
   ],
   CHALLENGER100: [
     {minDraw:0, maxDraw:9999, points:{R128:0, R64:0, R32:0, R16:8, QF:18, SF:35, F:60, W:100}, qual:{Q:2, Q2:0, Q1:0}}
+  ],
+  // The Olympics doesn't have a plain "SF" tier — the two semifinal losers
+  // play a real bronze medal match, so BRONZE and "4TH" (its winner and
+  // loser) replace SF entirely here. No qualifying either, per the
+  // reference table (an Olympic singles draw is straight into the main
+  // 64-draw, no qualifying rounds).
+  OLYMPICS: [
+    {minDraw:0, maxDraw:9999, points:{R128:0, R64:5, R32:35, R16:70, QF:135, BRONZE:340, "4TH":270, F:450, W:750}, qual:{Q:0, Q2:0, Q1:0}}
   ]
 };
 function ensurePointsConfig(){
@@ -218,6 +226,11 @@ function computeTournamentResults(tid){
   const matches = matchesForMainDraw(tid);
   const furthest = new Map(); // playerId -> {roundIdx, match}
   matches.forEach(m => {
+    // The bronze medal match isn't part of the normal round progression —
+    // it doesn't mean "further along" than the semifinal the way every
+    // other round does, so it's handled entirely separately below instead
+    // of feeding into the furthest-round chain.
+    if(m.round === "BRONZE") return;
     const idx = ROUND_ORDER.indexOf(m.round);
     [m.playerAId, m.playerBId].forEach(pid => {
       const cur = furthest.get(pid);
@@ -237,6 +250,21 @@ function computeTournamentResults(tid){
     }
     // won but not final -> still active, no result yet
   });
+
+  // Bronze medal match: overrides whatever the two semifinal losers would
+  // otherwise have been classified as ("Lost SF"), since the Olympics pays
+  // out differently for 3rd and 4th place than a normal semifinal loss.
+  // Checking the tournament's own level here (not just "does a BRONZE
+  // match happen to exist") means this can never apply anywhere else, even
+  // in the edge case where a tournament's level got changed away from
+  // Olympics after a bronze match was already recorded.
+  const t = tournamentById(tid);
+  const bronzeMatch = (t && t.level === "OLYMPICS") ? matches.find(m => m.round === "BRONZE") : null;
+  if(bronzeMatch && bronzeMatch.winnerId){
+    const loserId = bronzeMatch.playerAId === bronzeMatch.winnerId ? bronzeMatch.playerBId : bronzeMatch.playerAId;
+    results.set(bronzeMatch.winnerId, {code: "BRONZE", label: "Bronze Medal"});
+    if(loserId) results.set(loserId, {code: "4TH", label: "4th Place"});
+  }
   return results;
 }
 
@@ -2786,6 +2814,35 @@ function computeBracket(t){
   return rounds;
 }
 
+// The bronze medal match — only relevant for Olympics-level tournaments.
+// Both semifinals have to be decided first (that's where the two
+// participants come from: the SF losers, not the winners), and it's stored
+// as its own real match record (round: "BRONZE") the same way any other
+// bracket result is, just outside the normal R64→F progression. Returns
+// null whenever there's nothing to show yet — wrong level, semis not both
+// played, or a semifinal ended in a walkover/bye with no real loser to
+// place into it.
+function computeBronzeMatch(t){
+  if(t.level !== "OLYMPICS") return null;
+  const rounds = computeBracket(t);
+  const sfRound = rounds.find(r => r.round === "SF");
+  if(!sfRound || sfRound.matches.length !== 2) return null;
+  const losers = [];
+  for(const m of sfRound.matches){
+    if(m.status !== "played" || !m.winnerSlot) return null;
+    const loserSlot = (m.slotA.type === "player" && m.winnerSlot.playerId === m.slotA.playerId) ? m.slotB : m.slotA;
+    if(loserSlot.type !== "player") return null;
+    losers.push(loserSlot);
+  }
+  const existingMatch = state.matches.find(mm => mm.tournamentId === t.id && (mm.bracket || "main") === "main" && mm.round === "BRONZE");
+  let status = "ready", winnerSlot = null;
+  if(existingMatch){
+    status = "played";
+    winnerSlot = existingMatch.winnerId === losers[0].playerId ? losers[0] : losers[1];
+  }
+  return {round: "BRONZE", slotIndex: 0, slotA: losers[0], slotB: losers[1], existingMatch, status, winnerSlot};
+}
+
 // Deletes the recorded match at (roundIdx, matchIndex) and cascades forward,
 // since anything downstream was built on a result that no longer holds.
 function deleteCascade(t, roundIdx, matchIndex){
@@ -4399,6 +4456,7 @@ function renderBracketRounds(t){
     const wrap = el("div", {class:"bracket-wrap"});
     container.appendChild(wrap);
     layoutBracketColumns(wrap, rounds, cardBuilder, (roundObj) => ROUND_LABELS[roundObj.round] || roundObj.round);
+    renderOlympicsBronzeSection(t, container);
     renderSeedIndex(t);
     return;
   }
@@ -4450,7 +4508,21 @@ function renderBracketRounds(t){
     }
   }
 
+  renderOlympicsBronzeSection(t, container);
   renderSeedIndex(t);
+}
+
+// Appends the Bronze Medal Match section right after the main draw —
+// nothing renders at all for non-Olympics tournaments, or before both
+// semifinals are actually decided.
+function renderOlympicsBronzeSection(t, container){
+  if(t.level !== "OLYMPICS") return;
+  const bronzeMatchData = computeBronzeMatch(t);
+  if(!bronzeMatchData) return;
+  container.appendChild(el("div", {class:"bracket-section-title"}, [el("h3", {}, ["Bronze Medal Match"])]));
+  const wrap = el("div", {class:"bracket-wrap"});
+  wrap.appendChild(buildBronzeMatchCard(t, bronzeMatchData));
+  container.appendChild(wrap);
 }
 
 // A two-column seed sheet above the draw (seeds 1..N/2 on the left, the rest
@@ -4565,6 +4637,46 @@ function buildBracketMatchCard(t, m){
       e.stopPropagation();
       if(confirm("Clear this result? Later rounds built on it will be cleared too.")){
         deleteCascade(t, bracketRoundNames(capacityOf(t.drawSize)).indexOf(m.round), m.slotIndex);
+        saveState();
+        withScrollPreserved(() => renderBracketRounds(t));
+        renderRankings();
+      }
+    });
+    card.appendChild(clearX);
+  }
+  return card;
+}
+
+// A near-copy of buildBracketMatchCard for the one match that isn't part of
+// the normal round chain — it reuses the same slot rows and score-entry
+// form (both are already fully generic), but "Clear result" can't use
+// deleteCascade here: that walks the standard round-name list to find what
+// to delete and cascade forward from, and "BRONZE" was deliberately never
+// added to that list (it isn't "further along" than the semifinal the way
+// every real round is). A bronze match also has nothing built on top of it
+// to cascade into, so a direct removal by match id is all it actually needs.
+function buildBronzeMatchCard(t, m){
+  const card = el("div", {class:"bracket-match status-" + m.status});
+  card.appendChild(buildSlotRow(m.slotA, m, "A", t));
+  card.appendChild(buildSlotRow(m.slotB, m, "B", t));
+
+  if(m.status === "ready" && m.slotA.type === "player" && m.slotB.type === "player"){
+    const h2hBtn = el("button", {type:"button", class:"h2h-inline-badge", title:"View head-to-head record"}, ["H2H"]);
+    h2hBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openH2HPopup(m.slotA.playerId, m.slotB.playerId);
+    });
+    card.appendChild(h2hBtn);
+  }
+
+  if(m.status === "ready"){
+    card.appendChild(buildBracketEntryForm(t, m));
+  } else if(m.status === "played" && m.existingMatch){
+    const clearX = el("button", {type:"button", class:"clear-x", title:"Clear result"}, ["\u00d7"]);
+    clearX.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if(confirm("Clear the bronze medal match result?")){
+        state.matches = state.matches.filter(mm => mm.id !== m.existingMatch.id);
         saveState();
         withScrollPreserved(() => renderBracketRounds(t));
         renderRankings();
