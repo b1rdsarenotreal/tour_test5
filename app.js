@@ -47,13 +47,14 @@ const DEFAULT_POINTS_CONFIG = {
   CHALLENGER100: [
     {minDraw:0, maxDraw:9999, points:{R128:0, R64:0, R32:0, R16:8, QF:18, SF:35, F:60, W:100}, qual:{Q:2, Q2:0, Q1:0}}
   ],
-  // The Olympics doesn't have a plain "SF" tier — the two semifinal losers
-  // play a real bronze medal match, so BRONZE and "4TH" (its winner and
-  // loser) replace SF entirely here. No qualifying either, per the
-  // reference table (an Olympic singles draw is straight into the main
-  // 64-draw, no qualifying rounds).
+  // There's still a real bronze medal match between the two semifinal
+  // losers — it's just not treated as worth more or less than an ordinary
+  // semifinal loss for points/rankings purposes. Both losers simply earn
+  // the plain SF value here, same as any other level. No qualifying,
+  // per the reference table (an Olympic singles draw is straight into the
+  // main 64-draw, no qualifying rounds).
   OLYMPICS: [
-    {minDraw:0, maxDraw:9999, points:{R128:0, R64:5, R32:35, R16:70, QF:135, BRONZE:340, "4TH":270, F:450, W:750}, qual:{Q:0, Q2:0, Q1:0}}
+    {minDraw:0, maxDraw:9999, points:{R128:0, R64:5, R32:35, R16:70, QF:135, SF:305, F:450, W:750}, qual:{Q:0, Q2:0, Q1:0}}
   ]
 };
 function ensurePointsConfig(){
@@ -62,7 +63,29 @@ function ensurePointsConfig(){
     if(!Array.isArray(state.pointsConfig[level]) || state.pointsConfig[level].length === 0){
       // Deep copy so edits to state never mutate the defaults.
       state.pointsConfig[level] = JSON.parse(JSON.stringify(DEFAULT_POINTS_CONFIG[level]));
+      return;
     }
+    // The level already has brackets saved — but the points editor's Save
+    // Changes rebuilds a bracket entirely from whatever input fields exist
+    // in the DOM, so any point key the editor doesn't currently know about
+    // gets silently dropped the moment ANY save happens, even one
+    // unrelated to that level. This backfills any point/qual key that's
+    // genuinely missing (undefined) from an existing bracket, using the
+    // matching default bracket for that draw-size range — without ever
+    // touching a key that's already present, even if it's explicitly 0,
+    // so it never overwrites a real customization.
+    const defaultBrackets = DEFAULT_POINTS_CONFIG[level];
+    state.pointsConfig[level].forEach(bracket => {
+      const defaultBracket = defaultBrackets.find(db => db.minDraw === bracket.minDraw) || defaultBrackets[0];
+      if(!bracket.points) bracket.points = {};
+      if(!bracket.qual) bracket.qual = {};
+      Object.keys(defaultBracket.points).forEach(key => {
+        if(bracket.points[key] === undefined) bracket.points[key] = defaultBracket.points[key];
+      });
+      Object.keys(defaultBracket.qual).forEach(key => {
+        if(bracket.qual[key] === undefined) bracket.qual[key] = defaultBracket.qual[key];
+      });
+    });
   });
 }
 // Finds the bracket whose draw-size range actually contains this
@@ -226,10 +249,13 @@ function computeTournamentResults(tid){
   const matches = matchesForMainDraw(tid);
   const furthest = new Map(); // playerId -> {roundIdx, match}
   matches.forEach(m => {
-    // The bronze medal match isn't part of the normal round progression —
-    // it doesn't mean "further along" than the semifinal the way every
-    // other round does, so it's handled entirely separately below instead
-    // of feeding into the furthest-round chain.
+    // The bronze medal match still happens and gets recorded, but it isn't
+    // part of the normal round progression — skipping it here means it can
+    // never accidentally register as someone's "furthest round" (it isn't
+    // further along than the semifinal the way a real round is). Both
+    // semifinal losers are scored as a plain semifinal loss, same as any
+    // other level; the bronze match's own winner/loser still shows on the
+    // bracket itself, it just doesn't change points or rankings.
     if(m.round === "BRONZE") return;
     const idx = ROUND_ORDER.indexOf(m.round);
     [m.playerAId, m.playerBId].forEach(pid => {
@@ -250,21 +276,6 @@ function computeTournamentResults(tid){
     }
     // won but not final -> still active, no result yet
   });
-
-  // Bronze medal match: overrides whatever the two semifinal losers would
-  // otherwise have been classified as ("Lost SF"), since the Olympics pays
-  // out differently for 3rd and 4th place than a normal semifinal loss.
-  // Checking the tournament's own level here (not just "does a BRONZE
-  // match happen to exist") means this can never apply anywhere else, even
-  // in the edge case where a tournament's level got changed away from
-  // Olympics after a bronze match was already recorded.
-  const t = tournamentById(tid);
-  const bronzeMatch = (t && t.level === "OLYMPICS") ? matches.find(m => m.round === "BRONZE") : null;
-  if(bronzeMatch && bronzeMatch.winnerId){
-    const loserId = bronzeMatch.playerAId === bronzeMatch.winnerId ? bronzeMatch.playerBId : bronzeMatch.playerAId;
-    results.set(bronzeMatch.winnerId, {code: "BRONZE", label: "Bronze Medal"});
-    if(loserId) results.set(loserId, {code: "4TH", label: "4th Place"});
-  }
   return results;
 }
 
