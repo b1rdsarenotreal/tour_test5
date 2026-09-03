@@ -197,6 +197,9 @@ function loadState(){
 }
 function saveState(){
   rankingsAsOfCache.clear();
+  officialRanksAsOfCache.clear();
+  tournamentResultsCache.clear();
+  qualifyingResultsCache.clear();
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }catch(e){
@@ -245,7 +248,19 @@ function matchesForPlayer(pid){ return state.matches.filter(m => m.playerAId ===
 
 // Furthest-round result per player for a tournament: 'W', or a round code meaning "lost in that round".
 // Returns Map<playerId, {code, isChampion}>
+// A tournament's own result classification (who reached what round) only
+// ever depends on that tournament's own recorded matches — it's the same
+// answer no matter which as-of date is asking. But computeRankingsAsOf
+// re-derives it fresh for every tournament that falls inside each of the
+// many different rolling windows it walks (once per snapshot date, and a
+// given tournament typically stays "in window" for roughly a year's worth
+// of consecutive weekly snapshots) — so the same tournament was getting
+// recomputed dozens of times over. Caching by tournament id turns that
+// into a one-time cost per tournament, cleared on every saveState() the
+// same way the other ranking caches are.
+let tournamentResultsCache = new Map();
 function computeTournamentResults(tid){
+  if(tournamentResultsCache.has(tid)) return tournamentResultsCache.get(tid);
   const matches = matchesForMainDraw(tid);
   const furthest = new Map(); // playerId -> {roundIdx, match}
   matches.forEach(m => {
@@ -276,6 +291,7 @@ function computeTournamentResults(tid){
     }
     // won but not final -> still active, no result yet
   });
+  tournamentResultsCache.set(tid, results);
   return results;
 }
 
@@ -359,9 +375,15 @@ function generateQualifyingDraw(t){
 
 // Returns Map<playerId, {code, label}> — code is "Q1".."Qn" (eliminated in that
 // round) or "QUALIFIED" (won the last qualifying round, advances to the main draw).
+// Same reasoning as computeTournamentResults above — a tournament's
+// qualifying results only ever depend on its own recorded qualifying
+// matches, not on which as-of date is asking, so this is safe to cache
+// per tournament the same way.
+let qualifyingResultsCache = new Map();
 function computeQualifyingResults(t){
   ensureQualifyingEntries(t);
   if(!t.qualifying.enabled) return new Map();
+  if(qualifyingResultsCache.has(t.id)) return qualifyingResultsCache.get(t.id);
   const roundNames = qualRoundNames(t.qualifying.numRounds);
   const matches = matchesForQualifying(t.id);
   const furthest = new Map();
@@ -382,6 +404,7 @@ function computeQualifyingResults(t){
       results.set(pid, {code: m.round, label: "Lost " + m.round});
     }
   });
+  qualifyingResultsCache.set(t.id, results);
   return results;
 }
 
@@ -747,9 +770,20 @@ function officialRankingsAsOf(mondayW){
 // below them by one spot across Entry List, Seeding, Auto-Fill, Generate
 // Field, and Finals auto-seed, while the main Rankings table (which always
 // applied both halves together) stayed correct.
+// officialRanksAsOf gets called repeatedly with the SAME mondayW from
+// multiple places computing the same player's history (peak rank, the
+// ranking-history chart, etc.) — each call would otherwise redo a full
+// sort of every player, even though the underlying points totals
+// (computeRankingsAsOf) are already cached. This caches the actual ranked
+// result too, keyed by the week itself, so repeat lookups for the same
+// week are an instant map read instead of a fresh sort every time.
+let officialRanksAsOfCache = new Map();
 function officialRanksAsOf(mondayW){
+  if(officialRanksAsOfCache.has(mondayW)) return officialRanksAsOfCache.get(mondayW);
   const effectiveAsOf = mondayW - 7 * MS_PER_DAY;
-  return ranksFromTotals(computeRankingsAsOf(effectiveAsOf), effectiveAsOf);
+  const result = ranksFromTotals(computeRankingsAsOf(effectiveAsOf), effectiveAsOf);
+  officialRanksAsOfCache.set(mondayW, result);
+  return result;
 }
 
 // The actual counting rule: every mandatory result counts no matter how
@@ -808,21 +842,42 @@ function formatWeekDate(ms){
 // flagship's own first week, so a smaller event running alongside a
 // Slam's second week doesn't spuriously create an extra selectable
 // "ranking week" that wouldn't actually have existed.
-function canonicalRankingWeek(dateMs){
-  const naturalMonday = mondayOf(dateMs);
-  for(const t of state.tournaments){
-    if(!t.twoWeeks) continue;
+// If a date falls within some OTHER 2-week flagship tournament's second
+// week, it doesn't get its own "new" published ranking in reality — the
+// official list from the flagship's own first week is still current for
+// the whole fortnight. This redirects any such date back to that
+// flagship's own first week, so a smaller event running alongside a
+// Slam's second week doesn't spuriously create an extra selectable
+// "ranking week" that wouldn't actually have existed.
+//
+// The redirect map (which weeks need redirecting, and to where) only
+// changes when a tournament is added, edited, or removed — so it's built
+// once per call to getRankingSnapshotDates()/getRankingWeeks() rather than
+// re-scanning every tournament on every single date being canonicalized.
+// Doing that per-date used to make both functions O(tournaments²): calling
+// canonicalRankingWeek once per tournament, and having it itself loop over
+// every tournament each time, gets very slow as the tour's history grows.
+function buildCanonicalWeekRedirectMap(){
+  const map = new Map();
+  state.tournaments.forEach(t => {
+    if(!t.twoWeeks) return;
     const flagshipWeek1 = mondayOf(tournamentDateMs(t));
     const flagshipWeek2 = flagshipWeek1 + 7 * MS_PER_DAY;
-    if(naturalMonday === flagshipWeek2) return flagshipWeek1;
-  }
-  return naturalMonday;
+    map.set(flagshipWeek2, flagshipWeek1);
+  });
+  return map;
+}
+function canonicalRankingWeek(dateMs, redirectMap){
+  const naturalMonday = mondayOf(dateMs);
+  const map = redirectMap || buildCanonicalWeekRedirectMap();
+  return map.has(naturalMonday) ? map.get(naturalMonday) : naturalMonday;
 }
 
 function getRankingSnapshotDates(){
+  const redirectMap = buildCanonicalWeekRedirectMap();
   const dates = new Set();
   state.tournaments.forEach(t => {
-    if(matchesForTournament(t.id).length > 0) dates.add(canonicalRankingWeek(tournamentDateMs(t)));
+    if(matchesForTournament(t.id).length > 0) dates.add(canonicalRankingWeek(tournamentDateMs(t), redirectMap));
   });
   return Array.from(dates).sort((a,b) => a - b);
 }
@@ -833,12 +888,13 @@ function getRankingSnapshotDates(){
 // nothing new counts, but the rolling window still moves forward, and it's
 // still a valid date to seed a future draw against).
 function getRankingWeeks(){
+  const redirectMap = buildCanonicalWeekRedirectMap();
   const weeks = new Set();
   state.tournaments.forEach(t => {
-    if(matchesForTournament(t.id).length > 0) weeks.add(canonicalRankingWeek(tournamentDateMs(t)));
+    if(matchesForTournament(t.id).length > 0) weeks.add(canonicalRankingWeek(tournamentDateMs(t), redirectMap));
   });
-  (state.byeWeeks || []).forEach(bw => weeks.add(canonicalRankingWeek(byeWeekDateMs(bw))));
-  weeks.add(canonicalRankingWeek(getLatestActiveDate()));
+  (state.byeWeeks || []).forEach(bw => weeks.add(canonicalRankingWeek(byeWeekDateMs(bw), redirectMap)));
+  weeks.add(canonicalRankingWeek(getLatestActiveDate(), redirectMap));
   return Array.from(weeks).sort((a,b) => b - a);
 }
 
