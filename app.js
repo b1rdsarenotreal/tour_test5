@@ -1038,7 +1038,7 @@ function renderBreakdownTableHTML(playerId, asOfMs){
   if(entries.length === 0){
     return '<p class="picker-empty-note">No results in this window yet.</p>';
   }
-  const levels = ["GRAND_SLAM", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100", "FINALS"];
+  const levels = ["GRAND_SLAM", "OLYMPICS", "WTA1000", "WTA500", "WTA250", "CHALLENGER125", "CHALLENGER100", "FINALS"];
   const byLevel = {};
   levels.forEach(l => { byLevel[l] = entries.filter(e => e.level === l); });
 
@@ -4251,6 +4251,7 @@ function handleEntryListClick(e){
 // favor of mid-pack and rising players. Bands are (maxRank, weight) pairs,
 // checked in order — the last one (Infinity) catches everyone else.
 const FIELD_GEN_WEIGHT_BANDS = {
+  OLYMPICS: [{maxRank:20, weight:15}, {maxRank:50, weight:5}, {maxRank:100, weight:1}, {maxRank:Infinity, weight:0.1}],
   WTA1000: [{maxRank:30, weight:10}, {maxRank:60, weight:4}, {maxRank:100, weight:1}, {maxRank:Infinity, weight:0.2}],
   WTA500:  [{maxRank:20, weight:3}, {maxRank:60, weight:8}, {maxRank:100, weight:5}, {maxRank:150, weight:2}, {maxRank:Infinity, weight:0.5}],
   WTA250:  [{maxRank:20, weight:1}, {maxRank:50, weight:3}, {maxRank:100, weight:6}, {maxRank:200, weight:8}, {maxRank:Infinity, weight:3}],
