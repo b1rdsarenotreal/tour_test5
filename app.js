@@ -200,6 +200,7 @@ function saveState(){
   officialRanksAsOfCache.clear();
   tournamentResultsCache.clear();
   qualifyingResultsCache.clear();
+  tournamentPointsContributionCache.clear();
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }catch(e){
@@ -667,6 +668,49 @@ let rankingsAsOfCache = new Map();
 // any real result entering or leaving. forcedWindowDays lets the movement
 // calculation pin last week to the SAME width as this week, so the only
 // thing that can move a player's rank is an actual result change.
+// Same idea one layer up: a tournament's per-player POINTS contribution
+// (combining main-draw and qualifying results into what each player
+// actually earned there) is just as pure a function of the tournament
+// itself as its raw round classification is — it only changes if the
+// tournament's own results, level, draw size, or the points config
+// change, never because a different as-of date is asking. But it was
+// still being rebuilt from scratch (a fresh Set union, a fresh points
+// lookup per player) every time this SAME tournament fell inside a
+// different snapshot date's rolling window — and a tournament typically
+// stays "in window" for roughly a year's worth of consecutive weekly
+// snapshots. Caching it here means that work happens once per tournament
+// instead of once per (tournament, snapshot date) pair.
+let tournamentPointsContributionCache = new Map();
+function computeTournamentPointsContribution(t){
+  if(tournamentPointsContributionCache.has(t.id)) return tournamentPointsContributionCache.get(t.id);
+  const results = computeTournamentResults(t.id);
+  const qresults = (t.qualifying && t.qualifying.enabled) ? computeQualifyingResults(t) : new Map();
+  const combinedPlayerIds = new Set([...results.keys(), ...qresults.keys()]);
+  const contribution = new Map(); // playerId -> {points, isTitle}
+  combinedPlayerIds.forEach(pid => {
+    const mainRes = results.get(pid);
+    const qRes = qresults.get(pid);
+    let points = 0;
+    let isTitle = false;
+    if(mainRes){
+      points += pointsForResult(t.level, t.drawSize, mainRes.code);
+      if(mainRes.code === "W") isTitle = true;
+    }
+    if(qRes){
+      points += qualifyingPointsForResult(t.level, t.drawSize, qRes.code);
+    }
+    // Anyone who actually played the main draw always gets an entry (even
+    // worth 0 points, matching prior behavior). Someone who only played
+    // qualifying and scored nothing there gets no entry at all — no point
+    // wasting a slot on a result worth zero.
+    if(mainRes || points > 0){
+      contribution.set(pid, {points, isTitle});
+    }
+  });
+  tournamentPointsContributionCache.set(t.id, contribution);
+  return contribution;
+}
+
 function computeRankingsAsOf(asOfMs, forcedWindowDays){
   const windowDays = forcedWindowDays !== undefined ? forcedWindowDays : rollingWindowDays(asOfMs);
   const cacheKey = asOfMs + ":" + windowDays;
@@ -711,35 +755,12 @@ function computeRankingsAsOf(asOfMs, forcedWindowDays){
     }
 
     const mandatory = MANDATORY_LEVELS.has(t.level);
-    const results = computeTournamentResults(t.id);
-    const qresults = (t.qualifying && t.qualifying.enabled) ? computeQualifyingResults(t) : new Map();
-
-    // Qualifying isn't its own counted result anymore — it's bonus points
-    // folded straight into whatever this SAME tournament's main-draw result
-    // is worth, so it only ever occupies the one slot the tournament itself
-    // already uses (or none at all, if they qualified but the main draw
-    // hasn't happened/wasn't recorded).
-    const combinedPlayerIds = new Set([...results.keys(), ...qresults.keys()]);
-    combinedPlayerIds.forEach(pid => {
+    const contribution = computeTournamentPointsContribution(t);
+    contribution.forEach((c, pid) => {
       const entry = totals.get(pid);
       if(!entry) return;
-      const mainRes = results.get(pid);
-      const qRes = qresults.get(pid);
-      let points = 0;
-      if(mainRes){
-        points += pointsForResult(t.level, t.drawSize, mainRes.code);
-        if(mainRes.code === "W") entry.titles += 1;
-      }
-      if(qRes){
-        points += qualifyingPointsForResult(t.level, t.drawSize, qRes.code);
-      }
-      // Anyone who actually played the main draw always gets an entry (even
-      // worth 0 points, matching prior behavior). Someone who only played
-      // qualifying and scored nothing there gets no entry at all — no point
-      // wasting a slot on a result worth zero.
-      if(mainRes || points > 0){
-        perPlayerResults.get(pid).push({points, mandatory});
-      }
+      if(c.isTitle) entry.titles += 1;
+      perPlayerResults.get(pid).push({points: c.points, mandatory});
     });
   });
 
