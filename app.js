@@ -232,6 +232,30 @@ function migrateLegacyGsRoundCodes(){
   if(changed) saveState();
 }
 
+// One-time migration: a tournament's season year used to be whatever
+// calendar year its raw start date happened to fall on — so a tournament
+// starting in the last few days of December but playing out mostly in
+// January was filed under the wrong season. This recalculates every
+// existing tournament's year using the same "majority of the week" rule
+// newly-created and edited tournaments now use (computeTournamentSeasonYear,
+// defined further down — safe to reference here since this only ever runs
+// from DOMContentLoaded, well after the whole script has loaded), so
+// tournaments that predate the fix don't stay silently misfiled.
+function migrateTournamentSeasonYears(){
+  let changed = false;
+  (state.tournaments || []).forEach(t => {
+    if(!t.startDate) return;
+    const startDateMs = new Date(t.startDate + "T00:00:00").getTime();
+    if(isNaN(startDateMs)) return;
+    const correctYear = computeTournamentSeasonYear(startDateMs, t.twoWeeks ? 14 : 7);
+    if(t.year !== correctYear){
+      t.year = correctYear;
+      changed = true;
+    }
+  });
+  if(changed) saveState();
+}
+
 let state = loadState();
 
 function uid(prefix){
@@ -617,6 +641,26 @@ function tournamentDateMs(t){
     if(!isNaN(d.getTime())) return d.getTime();
   }
   return new Date(t.year || 2000, 0, 1).getTime();
+}
+
+// A tournament's "season" is whichever calendar year most of its week
+// actually falls in — not just whatever year its start date happens to
+// land on. A tournament starting Dec 30 plays out mostly in January, so it
+// belongs to next year's season even though its own start date is still
+// technically the tail end of December. Checks every day the tournament
+// actually spans (7 days normally, 14 for a flagged 2-week event) and
+// picks whichever year has the most of them.
+function computeTournamentSeasonYear(startDateMs, spanDays){
+  const counts = {};
+  for(let i = 0; i < spanDays; i++){
+    const y = new Date(startDateMs + i * MS_PER_DAY).getFullYear();
+    counts[y] = (counts[y] || 0) + 1;
+  }
+  let bestYear = null, bestCount = -1;
+  Object.keys(counts).forEach(y => {
+    if(counts[y] > bestCount){ bestCount = counts[y]; bestYear = Number(y); }
+  });
+  return bestYear;
 }
 
 // Real tours only count a capped number of a player's best results toward
@@ -5720,14 +5764,15 @@ function handleAddTournament(ev){
   const startDate = $("#at-date").value;
   if(!name || !startDate) return;
   const location = $("#at-location").value.trim();
-  const year = new Date(startDate + "T00:00:00").getFullYear();
+  const twoWeeks = $("#at-twoweeks").checked;
+  const year = computeTournamentSeasonYear(new Date(startDate + "T00:00:00").getTime(), twoWeeks ? 14 : 7);
   const level = $("#at-level").value;
   const surface = $("#at-surface").value;
 
   if(level === "FINALS"){
     state.tournaments.push({
       id: uid("t"), name, location, level, surface, year, startDate, drawSize: 8,
-      twoWeeks: $("#at-twoweeks").checked,
+      twoWeeks,
       bracketEntries: [], seeds: [], unseededEntrants: [],
       qualifying: {enabled:false, numQualifiers:8, numRounds:2, entrants:[], bracketEntries:[]},
       groups: [{id:"A", name:"Group A", playerIds:[]}, {id:"B", name:"Group B", playerIds:[]}],
@@ -5745,7 +5790,7 @@ function handleAddTournament(ev){
   const qualRounds = Number($("#at-qual-numrounds").value) || 2;
   state.tournaments.push({
     id: uid("t"), name, location, level, surface, year, startDate, drawSize,
-    twoWeeks: $("#at-twoweeks").checked,
+    twoWeeks,
     bracketEntries: new Array(capacityOf(drawSize)).fill(0).map(() => ({type:"empty"})),
     seeds: new Array(numSeedsFor(drawSize)).fill(null),
     unseededEntrants: [],
@@ -5791,8 +5836,8 @@ function handleEditTournament(ev){
   t.level = $("#et-level").value;
   t.surface = $("#et-surface").value;
   t.startDate = startDate;
-  t.year = new Date(startDate + "T00:00:00").getFullYear();
   t.twoWeeks = $("#et-twoweeks").checked;
+  t.year = computeTournamentSeasonYear(new Date(startDate + "T00:00:00").getTime(), t.twoWeeks ? 14 : 7);
   saveState();
   closeEditTournament();
   renderTournaments();
@@ -5896,6 +5941,7 @@ function handleImportFileSelected(e){
 /* ---------------- Wire up events ---------------- */
 document.addEventListener("DOMContentLoaded", () => {
   migrateLegacyGsRoundCodes();
+  migrateTournamentSeasonYears();
 
   // Only tabs with a real destination switch views directly — the Records
   // dropdown's own toggle button is styled the same but has no data-view
