@@ -847,6 +847,23 @@ function getLatestActiveDate(){
   return max !== null ? max : Date.now();
 }
 
+// The "current season" shown on a player's profile needs to match the
+// same majority-of-week rule a tournament's own season is filed under —
+// not just the raw calendar year of the latest active date, which can sit
+// on either side of a year boundary independent of which season most of
+// that week actually belongs to. If the latest activity was an actual
+// tournament, its own (already-correct) year is used directly rather than
+// re-deriving it; a bye week has no tournament to check against, so the
+// same rule is applied straight to its own date.
+function getCurrentSeasonYear(){
+  const latest = getLatestActiveDate();
+  const latestTournament = state.tournaments.find(t =>
+    matchesForTournament(t.id).length > 0 && tournamentDateMs(t) === latest
+  );
+  if(latestTournament) return latestTournament.year;
+  return computeTournamentSeasonYear(latest, 7);
+}
+
 // Real tours publish rankings on Mondays. Snap any date to the Monday of its own week.
 function mondayOf(dateMs){
   const d = new Date(dateMs);
@@ -2037,7 +2054,7 @@ function renderPlayerProfile(playerId){
   const wins = tourMatches.filter(m => m.winnerId === playerId).length;
   const losses = tourMatches.length - wins;
   const latest = getLatestActiveDate();
-  const currentYear = new Date(latest).getFullYear();
+  const currentYear = getCurrentSeasonYear();
   const yearMatches = tourMatches.filter(m => {
     const t = tournamentById(m.tournamentId);
     return t && t.year === currentYear;
